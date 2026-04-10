@@ -1,6 +1,9 @@
 {
+  "framework": "nextjs",
   "buildCommand": "npm run build",
   "outputDirectory": ".next",
   "installCommand": "npm install",
-  "framework": "nextjs"
+  "env": {
+    "BACKEND_URL": "@backend_url"
+  }
 }

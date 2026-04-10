@@ -18,7 +18,7 @@ export default function SchedulePanel() {
   const [saved, setSaved]     = useState(false);
 
   const load = async () => {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000"}/api/schedule`);
+    const res = await fetch(`/api/schedule`);
     const data = await res.json();
     setInfo(data);
     if (data.channel) setChannel(data.channel);
@@ -30,7 +30,7 @@ export default function SchedulePanel() {
 
   const save = async () => {
     setSaving(true);
-    await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000"}/api/schedule`, {
+    await fetch(`/api/schedule`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ channel_url: channel, times, timezone: tz }),
