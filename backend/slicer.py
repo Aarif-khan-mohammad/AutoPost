@@ -119,7 +119,7 @@ def download_video(video_url: str, job_id: str) -> str:
     if cookies_file:
         base["cookiefile"] = cookies_file
 
-    # Attempt 1 — android_vr client
+    # Attempt 1 — android_vr client (no cookies — client doesn't support them)
     try:
         log.info(f"[slicer] Downloading via android_vr client: {video_url}")
         opts = {
@@ -127,6 +127,7 @@ def download_video(video_url: str, job_id: str) -> str:
             "format": "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
             "extractor_args": {"youtube": {"player_client": ["android_vr"]}},
         }
+        opts.pop("cookiefile", None)  # android_vr doesn't support cookies
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([video_url])
         if os.path.exists(out) and os.path.getsize(out) > 10_000:
@@ -137,7 +138,7 @@ def download_video(video_url: str, job_id: str) -> str:
     if os.path.exists(out):
         os.remove(out)
 
-    # Attempt 2 — web client fallback
+    # Attempt 2 — web client with cookies
     try:
         log.info(f"[slicer] Falling back to web client: {video_url}")
         opts = {
