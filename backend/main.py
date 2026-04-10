@@ -26,27 +26,36 @@ log = logging.getLogger("autopost")
 
 scheduler = AsyncIOScheduler()
 
-def _setup_scheduler():
-    tz_name  = os.getenv("SCHEDULE_TIMEZONE", "Asia/Kolkata")
-    times    = os.getenv("SCHEDULE_TIMES", "07:00,12:00,18:00").split(",")
-    channel  = os.getenv("SCHEDULE_CHANNEL_URL", "").strip()
+def _setup_scheduler(override: dict = None):
+    tz_name = (override or {}).get("timezone") or os.getenv("SCHEDULE_TIMEZONE", "Asia/Kolkata")
+    times   = ((override or {}).get("times")    or os.getenv("SCHEDULE_TIMES", "07:00,12:00,18:00")).split(",")
+    channel = ((override or {}).get("channel")  or os.getenv("SCHEDULE_CHANNEL_URL", "")).strip()
 
     if not channel:
         log.warning("[scheduler] SCHEDULE_CHANNEL_URL not set — auto-posting disabled.")
         return
 
-    tz = pytz.timezone(tz_name)
-    for t in times:
-        hour, minute = t.strip().split(":")
-        scheduler.add_job(
-            scheduled_post,
-            CronTrigger(hour=int(hour), minute=int(minute), timezone=tz),
-            id=f"post_{hour}_{minute}",
-            replace_existing=True,
-        )
-        log.info(f"[scheduler] Scheduled post at {t} {tz_name}")
+    try:
+        tz = pytz.timezone(tz_name)
+    except Exception:
+        tz = pytz.timezone("Asia/Kolkata")
 
-    scheduler.start()
+    if not scheduler.running:
+        scheduler.start()
+
+    for t in times:
+        try:
+            hour, minute = t.strip().split(":")
+            scheduler.add_job(
+                scheduled_post,
+                CronTrigger(hour=int(hour), minute=int(minute), timezone=tz),
+                id=f"post_{hour}_{minute}",
+                replace_existing=True,
+            )
+            log.info(f"[scheduler] Scheduled post at {t} {tz_name}")
+        except Exception as e:
+            log.error(f"[scheduler] Failed to add job for {t}: {e}")
+
     log.info(f"[scheduler] Running — will post to: {channel}")
 
 
@@ -66,9 +75,13 @@ async def scheduled_post():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    _setup_scheduler()
+    try:
+        _setup_scheduler()
+    except Exception as e:
+        log.error(f"[scheduler] Startup error (non-fatal): {e}")
     yield
-    scheduler.shutdown(wait=False)
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -115,19 +128,19 @@ async def get_job_status(job_id: str):
     return job
 
 
+# In-memory overrides (survive for the lifetime of the process)
+_schedule_override: dict = {}
+
+
 @app.post("/api/schedule")
 async def update_schedule(cfg: ScheduleConfig):
-    """Update schedule on the fly without restarting the server."""
-    from dotenv import set_key
-    env_path = os.path.join(os.path.dirname(__file__), ".env")
-    set_key(env_path, "SCHEDULE_CHANNEL_URL", cfg.channel_url)
-    set_key(env_path, "SCHEDULE_TIMES",       cfg.times)
-    set_key(env_path, "SCHEDULE_TIMEZONE",    cfg.timezone)
+    """Update schedule on the fly — stores in memory (no .env write needed on cloud)."""
+    _schedule_override["channel"]  = cfg.channel_url
+    _schedule_override["times"]    = cfg.times
+    _schedule_override["timezone"] = cfg.timezone
 
-    # Reload env and reschedule
-    load_dotenv(override=True)
     scheduler.remove_all_jobs()
-    _setup_scheduler()
+    _setup_scheduler(override=_schedule_override)
 
     return {"status": "updated", "channel": cfg.channel_url, "times": cfg.times, "timezone": cfg.timezone}
 
@@ -139,7 +152,6 @@ async def health():
 
 @app.get("/api/schedule")
 async def get_schedule():
-    """Return current schedule config and next run times."""
     jobs = [
         {
             "id":       job.id,
@@ -148,9 +160,9 @@ async def get_schedule():
         for job in scheduler.get_jobs()
     ]
     return {
-        "channel":  os.getenv("SCHEDULE_CHANNEL_URL", ""),
-        "times":    os.getenv("SCHEDULE_TIMES", "07:00,12:00,18:00"),
-        "timezone": os.getenv("SCHEDULE_TIMEZONE", "Asia/Kolkata"),
+        "channel":  _schedule_override.get("channel")  or os.getenv("SCHEDULE_CHANNEL_URL", ""),
+        "times":    _schedule_override.get("times")    or os.getenv("SCHEDULE_TIMES", "07:00,12:00,18:00"),
+        "timezone": _schedule_override.get("timezone") or os.getenv("SCHEDULE_TIMEZONE", "Asia/Kolkata"),
         "jobs":     jobs,
     }
 
