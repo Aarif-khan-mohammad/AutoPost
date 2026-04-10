@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: autopost-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: YOUTUBE_CLIENT_ID
+        sync: false
+      - key: YOUTUBE_CLIENT_SECRET
+        sync: false
+      - key: YOUTUBE_REFRESH_TOKEN
+        sync: false
+      - key: SCHEDULE_CHANNEL_URL
+        sync: false
+      - key: SCHEDULE_TIMES
+        value: "07:00,12:00,18:00"
+      - key: SCHEDULE_TIMEZONE
+        value: "Asia/Kolkata"
+      - key: FRONTEND_URL
+        sync: false
