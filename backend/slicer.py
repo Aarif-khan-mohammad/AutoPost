@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import logging
 import subprocess
 import yt_dlp
 import imageio_ffmpeg
@@ -8,6 +9,7 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 
 load_dotenv()
+log = logging.getLogger("autopost")
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 DOWNLOADS_DIR = os.getenv("DOWNLOADS_DIR", "/tmp/autopost_downloads")
@@ -47,6 +49,7 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
             "http_headers": _YT_HEADERS,
         }
         try:
+            log.info(f"[slicer] Scanning feed: {feed}")
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(feed, download=False)
             for entry in (info.get("entries") or []):
@@ -58,8 +61,9 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
                         "title":    entry.get("title", ""),
                         "duration": int(entry.get("duration") or 0),
                     })
+            log.info(f"[slicer] Found {len(candidates)} new candidate(s) in {feed}")
         except Exception as e:
-            print(f"[channel] Feed {feed} error: {e}")
+            log.warning(f"[slicer] Feed {feed} error: {e}")
 
         if candidates:
             break  # found results in this feed, stop
@@ -69,9 +73,10 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
             "No new videos found — all recent uploads already processed."
         )
 
-    # Prefer Shorts (<=60s), fall back to any video
     shorts = [v for v in candidates if 0 < v["duration"] <= 60]
-    return shorts[0] if shorts else candidates[0]
+    chosen = shorts[0] if shorts else candidates[0]
+    log.info(f"[slicer] Selected: '{chosen['title']}' ({chosen['duration']}s) — {chosen['url']}")
+    return chosen
 
 
 # ── 2. Download full video ────────────────────────────────────────────────────
@@ -92,9 +97,9 @@ def download_video(video_url: str, job_id: str) -> str:
         "ffmpeg_location": os.path.dirname(FFMPEG),
     }
 
-    # Attempt 1 — android_vr client: bypasses n-challenge, gets all formats
+    # Attempt 1 — android_vr client
     try:
-        print("[yt-dlp] Downloading via android_vr client...")
+        log.info(f"[slicer] Downloading via android_vr client: {video_url}")
         opts = {
             **base,
             "format": "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
@@ -103,16 +108,16 @@ def download_video(video_url: str, job_id: str) -> str:
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([video_url])
         if os.path.exists(out) and os.path.getsize(out) > 10_000:
-            print("[yt-dlp] android_vr succeeded.")
+            log.info(f"[slicer] Download OK ({os.path.getsize(out) // 1024 // 1024} MB): {out}")
             return out
     except Exception as e:
-        print(f"[yt-dlp] android_vr failed: {e}")
+        log.warning(f"[slicer] android_vr failed: {e}")
     if os.path.exists(out):
         os.remove(out)
 
     # Attempt 2 — web client fallback
     try:
-        print("[yt-dlp] Falling back to web client...")
+        log.info(f"[slicer] Falling back to web client: {video_url}")
         opts = {
             **base,
             "format": "bestvideo[height<=720]+bestaudio/best[height<=720]/18/best",
@@ -122,10 +127,10 @@ def download_video(video_url: str, job_id: str) -> str:
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([video_url])
         if os.path.exists(out) and os.path.getsize(out) > 10_000:
-            print("[yt-dlp] web client succeeded.")
+            log.info(f"[slicer] Download OK ({os.path.getsize(out) // 1024 // 1024} MB): {out}")
             return out
     except Exception as e:
-        print(f"[yt-dlp] web client failed: {e}")
+        log.warning(f"[slicer] web client failed: {e}")
 
     raise RuntimeError(f"Could not download: {video_url}")
 
@@ -142,16 +147,16 @@ def analyze_with_gemini(video_path: str, duration: int) -> tuple[float, str, lis
         except Exception as e:
             msg = str(e)
             if "429" in msg or "quota" in msg.lower():
-                print(f"[Gemini] {model_name} quota exceeded, trying next model...")
+                log.warning(f"[slicer] Gemini {model_name} quota exceeded, trying next...")
                 continue
-            raise  # non-quota error — re-raise immediately
+            raise
 
     raise RuntimeError("All Gemini models quota exceeded. Wait a minute and retry.")
 
 
 def _call_gemini(model_name: str, video_path: str, duration: int) -> tuple[float, str, list[str]]:
     model = genai.GenerativeModel(model_name)
-    print(f"[Gemini] Uploading video via {model_name}...")
+    log.info(f"[slicer] Uploading to Gemini ({model_name}), duration={duration}s")
     video_file = genai.upload_file(path=video_path, mime_type="video/mp4")
 
     for _ in range(30):
@@ -161,6 +166,8 @@ def _call_gemini(model_name: str, video_path: str, duration: int) -> tuple[float
         time.sleep(4)
     else:
         raise RuntimeError("Gemini file never became ACTIVE.")
+
+    log.info(f"[slicer] Gemini file ACTIVE, generating content...")
 
     is_short  = duration <= 60
     max_start = max(0, duration - CLIP_DURATION)
@@ -186,7 +193,7 @@ HASHTAGS: <tag1>, <tag2>, <tag3>, <tag4>"""
 
     response = model.generate_content([video_file, prompt])
     text = response.text.strip()
-    print(f"[Gemini] {text}")
+    log.info(f"[slicer] Gemini response: {text}")
 
     start_time = 0.0
     caption    = "You need to see this 🔥"
@@ -199,6 +206,7 @@ HASHTAGS: <tag1>, <tag2>, <tag3>, <tag4>"""
     if m := re.search(r"HASHTAGS:\s*(.+)", text):
         hashtags = [h.strip().lstrip("#") for h in m.group(1).split(",")]
 
+    log.info(f"[slicer] Parsed — start={start_time}s caption='{caption}' hashtags={hashtags}")
     return min(max(0.0, start_time), float(max_start)), caption, hashtags
 
 
@@ -216,9 +224,11 @@ def export_vertical(source: str, start: float, job_id: str) -> str:
         "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart", out,
     ]
+    log.info(f"[slicer] Running ffmpeg crop: start={start}s output={out}")
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(f"ffmpeg failed:\n{r.stderr[-800:]}")
+    log.info(f"[slicer] ffmpeg done: {os.path.getsize(out) // 1024} KB")
     return out
 
 
@@ -244,7 +254,7 @@ def process_channel(
     step("downloading")
     video_info = get_next_video(channel_url, already_used)
     is_short   = video_info["duration"] <= 60
-    print(f"[pipeline] Selected ({'Short' if is_short else 'video'}): {video_info['title']} ({video_info['duration']}s)")
+    log.info(f"[slicer] Processing ({'Short' if is_short else 'video'}): '{video_info['title']}' ({video_info['duration']}s)")
 
     source = download_video(video_info["url"], job_id)
 

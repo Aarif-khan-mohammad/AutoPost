@@ -20,6 +20,11 @@ from slicer import process_channel
 from publisher import publish_to_youtube, publish_to_instagram
 
 load_dotenv()
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 log = logging.getLogger("autopost")
 
 # ── Scheduler setup ───────────────────────────────────────────────────────────
@@ -60,12 +65,14 @@ def _setup_scheduler(override: dict = None):
 
 
 async def scheduled_post():
-    """Triggered automatically at each scheduled time."""
-    channel = os.getenv("SCHEDULE_CHANNEL_URL", "").strip()
+    channel = (_schedule_override.get("channel") or os.getenv("SCHEDULE_CHANNEL_URL", "")).strip()
     if not channel:
+        log.warning("[scheduler] Fired but no channel set — skipping")
         return
-    log.info(f"[scheduler] Auto-posting from {channel}")
     job_id = str(uuid.uuid4())
+    log.info(f"[scheduler] ⏰ Auto-post triggered")
+    log.info(f"[scheduler]   channel : {channel}")
+    log.info(f"[scheduler]   job_id  : {job_id}")
     await create_job(job_id, channel)
     asyncio.create_task(run_pipeline(job_id, channel))
 
@@ -113,8 +120,12 @@ class ScheduleConfig(BaseModel):
 
 @app.post("/api/process")
 async def process_video(req: ProcessRequest):
-    """Manual one-click trigger."""
     job_id = str(uuid.uuid4())
+    log.info(f"[api] ▶ Manual process triggered")
+    log.info(f"[api]   job_id      : {job_id}")
+    log.info(f"[api]   channel_url : {req.channel_url}")
+    log.info(f"[api]   youtube     : {'token provided' if req.youtube_token else 'using .env refresh token'}")
+    log.info(f"[api]   instagram   : {'configured' if req.instagram_token else 'skipped'}")
     await create_job(job_id, req.channel_url)
     asyncio.create_task(run_pipeline(job_id, req.channel_url, req))
     return {"job_id": job_id, "status": "queued"}
@@ -134,7 +145,6 @@ _schedule_override: dict = {}
 
 @app.post("/api/schedule")
 async def update_schedule(cfg: ScheduleConfig):
-    """Update schedule on the fly — stores in memory (no .env write needed on cloud)."""
     _schedule_override["channel"]  = cfg.channel_url
     _schedule_override["times"]    = cfg.times
     _schedule_override["timezone"] = cfg.timezone
@@ -142,6 +152,10 @@ async def update_schedule(cfg: ScheduleConfig):
     scheduler.remove_all_jobs()
     _setup_scheduler(override=_schedule_override)
 
+    log.info(f"[api] 📅 Schedule updated")
+    log.info(f"[api]   channel  : {cfg.channel_url}")
+    log.info(f"[api]   times    : {cfg.times}")
+    log.info(f"[api]   timezone : {cfg.timezone}")
     return {"status": "updated", "channel": cfg.channel_url, "times": cfg.times, "timezone": cfg.timezone}
 
 
@@ -170,20 +184,32 @@ async def get_schedule():
 # ── Pipeline ──────────────────────────────────────────────────────────────────
 
 async def run_pipeline(job_id: str, channel_url: str, req: ProcessRequest | None = None):
+    log.info(f"[pipeline] ═══════════════════════════════════")
+    log.info(f"[pipeline] 🚀 Starting job {job_id}")
+    log.info(f"[pipeline]   channel : {channel_url}")
     try:
         loop = asyncio.get_event_loop()
 
         def sync_step(name: str):
+            log.info(f"[pipeline] ⟳ Step: {name}")
             asyncio.run_coroutine_threadsafe(
                 update_job(job_id, status="processing", step=name), loop
             )
 
         await update_job(job_id, status="processing", step="downloading")
         already_used = await get_processed_video_ids(channel_url)
+        log.info(f"[pipeline] Already processed: {len(already_used)} video(s)")
 
         output_path, caption, hashtags, video_info = await asyncio.to_thread(
             process_channel, channel_url, job_id, already_used, sync_step
         )
+
+        log.info(f"[pipeline] ✂  Clip ready")
+        log.info(f"[pipeline]   title    : {video_info['title']}")
+        log.info(f"[pipeline]   video_id : {video_info['video_id']}")
+        log.info(f"[pipeline]   duration : {video_info['duration']}s")
+        log.info(f"[pipeline]   caption  : {caption}")
+        log.info(f"[pipeline]   hashtags : {', '.join(hashtags)}")
 
         await mark_video_processed(channel_url, video_info["video_id"], video_info["title"])
 
@@ -195,25 +221,29 @@ async def run_pipeline(job_id: str, channel_url: str, req: ProcessRequest | None
             "hashtags":     hashtags,
         }
 
-        # YouTube — always use stored refresh token; fall back to passed token
+        log.info(f"[pipeline] 📤 Uploading to YouTube...")
         yt_token = req.youtube_token if req else None
         yt_url = await asyncio.to_thread(
             publish_to_youtube, output_path, caption, hashtags, yt_token
         )
         results["youtube"] = yt_url
+        log.info(f"[pipeline] ✅ YouTube uploaded: {yt_url}")
 
-        # Instagram — only if credentials provided
         if req and req.instagram_token and req.instagram_user_id:
+            log.info(f"[pipeline] 📤 Uploading to Instagram...")
             ig_id = await asyncio.to_thread(
                 publish_to_instagram,
                 output_path, caption, hashtags,
                 req.instagram_token, req.instagram_user_id,
             )
             results["instagram"] = ig_id
+            log.info(f"[pipeline] ✅ Instagram posted: {ig_id}")
 
         await update_job(job_id, status="done", step="complete", results=results)
-        log.info(f"[pipeline] Done: {video_info['title']} → {yt_url}")
+        log.info(f"[pipeline] 🎉 Job {job_id} DONE")
+        log.info(f"[pipeline] ═══════════════════════════════════")
 
     except Exception as e:
-        log.error(f"[pipeline] Failed: {e}")
+        log.error(f"[pipeline] ❌ Job {job_id} FAILED: {e}")
+        log.info(f"[pipeline] ═══════════════════════════════════")
         await update_job(job_id, status="failed", step=str(e))
