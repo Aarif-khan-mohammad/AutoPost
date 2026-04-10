@@ -86,15 +86,22 @@ export default function JobForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setJob(null);
-    const res  = await fetch("/api/process", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    const data = await res.json();
-    setJob({ job_id: data.job_id, status: "queued", step: "queued" });
-    poll(data.job_id);
+    setJob({ job_id: "pending", status: "queued", step: "queued" }); // show cards immediately
+    try {
+      const res = await fetch("/api/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Request failed");
+      setJob({ job_id: data.job_id, status: "queued", step: "queued" });
+      poll(data.job_id);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setJob({ job_id: "error", status: "failed", step: msg });
+      setLoading(false);
+    }
   };
 
   const activeIdx = job ? STAGES.findIndex((s) => s.key === job.step) : -1;

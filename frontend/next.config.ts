@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverRuntimeConfig: {
-    BACKEND_URL: process.env.BACKEND_URL,
+  env: {
+    BACKEND_URL: process.env.BACKEND_URL || "https://autopost-2s7o.onrender.com",
   },
 };
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const BACKEND_URL = process.env.BACKEND_URL!;
+const BACKEND_URL = process.env.BACKEND_URL as string;
 
 export async function GET() {
   if (!BACKEND_URL) return NextResponse.json({ channel: "", times: "", timezone: "", jobs: [] });
