@@ -145,7 +145,7 @@ async def update_schedule(cfg: ScheduleConfig):
     return {"status": "updated", "channel": cfg.channel_url, "times": cfg.times, "timezone": cfg.timezone}
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def health():
     return {"status": "ok", "service": "autopost"}
 
