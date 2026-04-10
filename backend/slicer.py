@@ -1,8 +1,10 @@
 import os
 import re
 import time
+import base64
 import logging
 import subprocess
+import tempfile
 import yt_dlp
 import imageio_ffmpeg
 import google.generativeai as genai
@@ -25,6 +27,23 @@ _YT_HEADERS = {
         "Chrome/125.0.0.0 Safari/537.36"
     ),
 }
+
+
+def _get_cookies_file() -> str | None:
+    """Write YOUTUBE_COOKIES_B64 env var to a temp file and return its path."""
+    b64 = os.getenv("YOUTUBE_COOKIES_B64", "").strip()
+    if not b64:
+        return None
+    try:
+        data = base64.b64decode(b64)
+        tmp  = tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode="wb")
+        tmp.write(data)
+        tmp.close()
+        log.info(f"[slicer] Loaded cookies from YOUTUBE_COOKIES_B64 ({len(data)} bytes)")
+        return tmp.name
+    except Exception as e:
+        log.warning(f"[slicer] Failed to decode cookies: {e}")
+        return None
 
 
 # ── 1. Pick next video from channel not yet processed ────────────────────────
@@ -82,20 +101,23 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
 # ── 2. Download full video ────────────────────────────────────────────────────
 
 def download_video(video_url: str, job_id: str) -> str:
-    out = os.path.join(DOWNLOADS_DIR, f"{job_id}_source.mp4")
+    out         = os.path.join(DOWNLOADS_DIR, f"{job_id}_source.mp4")
+    cookies_file = _get_cookies_file()
     if os.path.exists(out):
         os.remove(out)
 
     base = {
-        "outtmpl": out,
-        "merge_output_format": "mp4",
-        "quiet": False,
-        "noplaylist": True,
-        "socket_timeout": 30,
-        "retries": 3,
-        "http_headers": _YT_HEADERS,
-        "ffmpeg_location": os.path.dirname(FFMPEG),
+        "outtmpl":              out,
+        "merge_output_format":  "mp4",
+        "quiet":                False,
+        "noplaylist":           True,
+        "socket_timeout":       30,
+        "retries":              3,
+        "http_headers":         _YT_HEADERS,
+        "ffmpeg_location":      os.path.dirname(FFMPEG),
     }
+    if cookies_file:
+        base["cookiefile"] = cookies_file
 
     # Attempt 1 — android_vr client
     try:
