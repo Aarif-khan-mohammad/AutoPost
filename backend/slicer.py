@@ -103,7 +103,7 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
             [
                 _sys.executable, "-m", "yt_dlp",
                 "--flat-playlist",
-                "--print", "%(id)s\t%(duration)s\t%(upload_date)s\t%(title)s",
+                "--print", "%(id)s|%(duration)s|%(title)s",
                 "--playlist-end", "50",
                 "--quiet",
                 base_url + "/videos",
@@ -119,7 +119,7 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
         log.info(f"[slicer] Raw lines from yt-dlp: {len(lines)}")
 
         for line in lines:
-            parts = line.split("\t", 3)
+            parts = line.split("|", 2)
             if len(parts) < 2:
                 continue
             vid_id = parts[0].strip()
@@ -127,23 +127,15 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
                 duration = float(parts[1].strip() or 0)
             except ValueError:
                 duration = 0
-            upload_date = parts[2].strip() if len(parts) > 2 else ""
-            title = parts[3].strip() if len(parts) > 3 else ""
+            title = parts[2].strip() if len(parts) > 2 else ""
 
             if vid_id and vid_id not in already_used and 0 < duration <= 60:
-                # Parse upload_date YYYYMMDD -> timestamp
-                ts = 0
-                try:
-                    from datetime import datetime, timezone
-                    ts = int(datetime.strptime(upload_date, "%Y%m%d").replace(tzinfo=timezone.utc).timestamp())
-                except Exception:
-                    pass
                 candidates.append({
                     "video_id":  vid_id,
                     "url":       f"https://www.youtube.com/watch?v={vid_id}",
                     "title":     title,
                     "duration":  int(duration),
-                    "timestamp": ts,
+                    "timestamp": 0,
                 })
 
         log.info(f"[slicer] Found {len(candidates)} unprocessed short(s) (<= 60s)")
