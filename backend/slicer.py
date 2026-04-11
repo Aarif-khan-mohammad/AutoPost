@@ -102,16 +102,17 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
 # ── 2. Download full video ────────────────────────────────────────────────────
 
 _DOWNLOAD_ATTEMPTS = [
-    ("mweb",        "bestvideo[height<=720]+bestaudio/best[height<=720]/best"),
-    ("android",     "bestvideo[height<=1080]+bestaudio/best[height<=1080]"),
-    ("android_vr",  "bestvideo[height<=1080]+bestaudio/best[height<=1080]"),
-    ("web",         "bestvideo[height<=720]+bestaudio/best[height<=720]/18/best"),
+    ("mweb",       "bestvideo[height<=720]+bestaudio/best[height<=720]/best"),
+    ("android",    "bestvideo[height<=1080]+bestaudio/best[height<=1080]"),
+    ("android_vr", "bestvideo[height<=1080]+bestaudio/best[height<=1080]"),
+    ("web",        "bestvideo[height<=720]+bestaudio/best[height<=720]/18/best"),
 ]
 
 
 def download_video(video_url: str, job_id: str) -> str:
     out          = os.path.join(DOWNLOADS_DIR, f"{job_id}_source.mp4")
     cookies_file = _get_cookies_file()
+    proxy        = os.getenv("YTDLP_PROXY", "").strip() or None
     if os.path.exists(out):
         os.remove(out)
 
@@ -120,15 +121,16 @@ def download_video(video_url: str, job_id: str) -> str:
         "merge_output_format": "mp4",
         "quiet":               False,
         "noplaylist":          True,
-        "socket_timeout":      30,
+        "socket_timeout":      60,
         "retries":             3,
         "http_headers":        _YT_HEADERS,
         "ffmpeg_location":     os.path.dirname(FFMPEG),
-        "sleep_interval":      2,
-        "max_sleep_interval":  5,
     }
     if cookies_file:
         base["cookiefile"] = cookies_file
+    if proxy:
+        base["proxy"] = proxy
+        log.info(f"[slicer] Using proxy: {proxy[:40]}...")
 
     for client, fmt in _DOWNLOAD_ATTEMPTS:
         try:
@@ -147,7 +149,7 @@ def download_video(video_url: str, job_id: str) -> str:
             log.warning(f"[slicer] {client} failed: {e}")
         if os.path.exists(out):
             os.remove(out)
-        time.sleep(5)  # back off before next attempt
+        time.sleep(3)
 
     raise RuntimeError(f"Could not download: {video_url}")
 
