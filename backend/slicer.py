@@ -130,14 +130,17 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
                 except ValueError:
                     duration = 0
                 title = parts[2].strip() if len(parts) > 2 else ""
-                if vid_id and vid_id not in already_used and vid_id not in seen and 0 < duration <= 60:
-                    candidates.append({
-                        "video_id": vid_id,
-                        "url":      f"https://www.youtube.com/watch?v={vid_id}",
-                        "title":    title,
-                        "duration": int(duration),
-                        "timestamp": 0,
-                    })
+                # /shorts tab: duration is NA — anything there is a Short by definition
+                # /videos tab: only include if duration <= 60
+                if vid_id and vid_id not in already_used and vid_id not in seen:
+                    if tab == "/shorts" or (0 < duration <= 60):
+                        candidates.append({
+                            "video_id": vid_id,
+                            "url":      f"https://www.youtube.com/watch?v={vid_id}",
+                            "title":    title,
+                            "duration": int(duration) if duration > 0 else 60,
+                            "timestamp": 0,
+                        })
 
         log.info(f"[slicer] Found {len(candidates)} unprocessed short(s) (<= 60s)")
 
