@@ -78,50 +78,60 @@ def _get_oauth_token() -> str | None:
 
 def get_next_video(channel_url: str, already_used: list[str]) -> dict:
     """
-    Check /shorts tab first, then main uploads.
-    Returns first video not in already_used that has downloadable formats.
+    Scans /shorts tab only.
+    Picks today's short if available, otherwise most recent unprocessed.
+    Skips 0-duration (members-only/restricted) videos.
     """
-    base_url   = channel_url.rstrip("/")
-    feeds      = [base_url + "/shorts", base_url]
+    from datetime import datetime, timezone
+
+    base_url = channel_url.rstrip("/")
+    opts = {
+        "quiet":        True,
+        "extract_flat": "in_playlist",
+        "playlistend":  20,
+        "noplaylist":   False,
+        "http_headers": _YT_HEADERS,
+    }
+
     candidates = []
-
-    for feed in feeds:
-        opts = {
-            "quiet": True,
-            "extract_flat": "in_playlist",
-            "playlistend": 20,
-            "noplaylist": False,
-            "extractor_args": {"youtube": {"player_client": ["web"]}},
-            "http_headers": _YT_HEADERS,
-        }
-        try:
-            log.info(f"[slicer] Scanning feed: {feed}")
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(feed, download=False)
-            for entry in (info.get("entries") or []):
-                vid_id   = entry.get("id", "")
-                duration = int(entry.get("duration") or 0)
-                if vid_id and vid_id not in already_used and duration > 0:
-                    candidates.append({
-                        "video_id": vid_id,
-                        "url":      f"https://www.youtube.com/watch?v={vid_id}",
-                        "title":    entry.get("title", ""),
-                        "duration": duration,
-                    })
-            log.info(f"[slicer] Found {len(candidates)} new candidate(s) in {feed}")
-        except Exception as e:
-            log.warning(f"[slicer] Feed {feed} error: {e}")
-
-        if candidates:
-            break
+    try:
+        log.info(f"[slicer] Scanning shorts: {base_url}/shorts")
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(base_url + "/shorts", download=False)
+        for entry in (info.get("entries") or []):
+            vid_id   = entry.get("id", "")
+            duration = int(entry.get("duration") or 0)
+            if vid_id and vid_id not in already_used and duration > 0:
+                candidates.append({
+                    "video_id":  vid_id,
+                    "url":       f"https://www.youtube.com/watch?v={vid_id}",
+                    "title":     entry.get("title", ""),
+                    "duration":  duration,
+                    "timestamp": int(entry.get("timestamp") or 0),
+                })
+        log.info(f"[slicer] Found {len(candidates)} new short(s)")
+    except Exception as e:
+        log.warning(f"[slicer] Shorts scan error: {e}")
 
     if not candidates:
-        raise RuntimeError("No new videos found — all recent uploads already processed.")
+        raise RuntimeError("No new shorts found — all recent uploads already processed.")
 
-    # Prefer Shorts, then fall back to regular videos
-    shorts = [v for v in candidates if 0 < v["duration"] <= 60]
-    chosen = shorts[0] if shorts else candidates[0]
-    log.info(f"[slicer] Selected: '{chosen['title']}' ({chosen['duration']}s) — {chosen['url']}")
+    # Sort newest first
+    candidates.sort(key=lambda v: v["timestamp"], reverse=True)
+
+    today = datetime.now(timezone.utc).date()
+    todays = [
+        v for v in candidates
+        if v["timestamp"] and
+        datetime.fromtimestamp(v["timestamp"], tz=timezone.utc).date() == today
+    ]
+
+    chosen = todays[0] if todays else candidates[0]
+    upload_date = (
+        datetime.fromtimestamp(chosen["timestamp"], tz=timezone.utc).date()
+        if chosen["timestamp"] else "unknown"
+    )
+    log.info(f"[slicer] Selected: '{chosen['title']}' ({chosen['duration']}s) uploaded={upload_date} — {chosen['url']}")
     return chosen
 
 
