@@ -78,9 +78,8 @@ def _get_oauth_token() -> str | None:
 
 def get_next_video(channel_url: str, already_used: list[str]) -> dict:
     """
-    Scans /shorts tab only.
-    Picks today's short if available, otherwise most recent unprocessed.
-    Skips 0-duration (members-only/restricted) videos.
+    Scans main channel feed, filters videos <= 60s (Shorts).
+    Picks today's if available, otherwise most recent unprocessed.
     """
     from datetime import datetime, timezone
 
@@ -88,20 +87,20 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
     opts = {
         "quiet":        True,
         "extract_flat": "in_playlist",
-        "playlistend":  20,
+        "playlistend":  50,
         "noplaylist":   False,
         "http_headers": _YT_HEADERS,
     }
 
     candidates = []
     try:
-        log.info(f"[slicer] Scanning shorts: {base_url}/shorts")
+        log.info(f"[slicer] Scanning channel: {base_url}")
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(base_url + "/shorts", download=False)
+            info = ydl.extract_info(base_url, download=False)
         for entry in (info.get("entries") or []):
             vid_id   = entry.get("id", "")
             duration = int(entry.get("duration") or 0)
-            if vid_id and vid_id not in already_used and duration > 0:
+            if vid_id and vid_id not in already_used and 0 < duration <= 60:
                 candidates.append({
                     "video_id":  vid_id,
                     "url":       f"https://www.youtube.com/watch?v={vid_id}",
@@ -109,9 +108,9 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
                     "duration":  duration,
                     "timestamp": int(entry.get("timestamp") or 0),
                 })
-        log.info(f"[slicer] Found {len(candidates)} new short(s)")
+        log.info(f"[slicer] Found {len(candidates)} unprocessed short(s) (<= 60s)")
     except Exception as e:
-        log.warning(f"[slicer] Shorts scan error: {e}")
+        log.warning(f"[slicer] Channel scan error: {e}")
 
     if not candidates:
         raise RuntimeError("No new shorts found — all recent uploads already processed.")
