@@ -102,7 +102,7 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
     try:
         log.info(f"[slicer] Scanning channel: {base_url}")
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(base_url, download=False)
+            info = ydl.extract_info(base_url + "/videos", download=False)
         for entry in (info.get("entries") or []):
             vid_id   = entry.get("id", "")
             duration = int(entry.get("duration") or 0)
