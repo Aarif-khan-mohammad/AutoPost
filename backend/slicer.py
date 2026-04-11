@@ -94,49 +94,50 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
     candidates = []
 
     try:
-        log.info(f"[slicer] Scanning channel: {base_url}/videos")
-        # Write to temp file to avoid Windows stdout pipe issues
-        with _tmp.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            tmp_path = f.name
+        log.info(f"[slicer] Scanning channel: {base_url}")
+        # Scan both /shorts and /videos tabs to cover all cases
+        for tab in ["/shorts", "/videos"]:
+            with _tmp.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+                tmp_path = f.name
 
-        ret = subprocess.call(
-            [
-                _sys.executable, "-m", "yt_dlp",
-                "--flat-playlist",
-                "--print", "%(id)s|%(duration)s|%(title)s",
-                "--playlist-end", "50",
-                "--quiet",
-                base_url + "/videos",
-            ],
-            stdout=open(tmp_path, "w"),
-            stderr=subprocess.DEVNULL,
-        )
+            subprocess.call(
+                [
+                    _sys.executable, "-m", "yt_dlp",
+                    "--flat-playlist",
+                    "--print", "%(id)s|%(duration)s|%(title)s",
+                    "--playlist-end", "30",
+                    "--quiet",
+                    base_url + tab,
+                ],
+                stdout=open(tmp_path, "w"),
+                stderr=subprocess.DEVNULL,
+            )
 
-        with open(tmp_path, "r", encoding="utf-8", errors="ignore") as f:
-            lines = f.read().strip().splitlines()
-        os.unlink(tmp_path)
+            with open(tmp_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.read().strip().splitlines()
+            os.unlink(tmp_path)
 
-        log.info(f"[slicer] Raw lines from yt-dlp: {len(lines)}")
+            log.info(f"[slicer] {tab}: {len(lines)} lines")
 
-        for line in lines:
-            parts = line.split("|", 2)
-            if len(parts) < 2:
-                continue
-            vid_id = parts[0].strip()
-            try:
-                duration = float(parts[1].strip() or 0)
-            except ValueError:
-                duration = 0
-            title = parts[2].strip() if len(parts) > 2 else ""
-
-            if vid_id and vid_id not in already_used and 0 < duration <= 60:
-                candidates.append({
-                    "video_id":  vid_id,
-                    "url":       f"https://www.youtube.com/watch?v={vid_id}",
-                    "title":     title,
-                    "duration":  int(duration),
-                    "timestamp": 0,
-                })
+            seen = {c["video_id"] for c in candidates}
+            for line in lines:
+                parts = line.split("|", 2)
+                if len(parts) < 2:
+                    continue
+                vid_id = parts[0].strip()
+                try:
+                    duration = float(parts[1].strip() or 0)
+                except ValueError:
+                    duration = 0
+                title = parts[2].strip() if len(parts) > 2 else ""
+                if vid_id and vid_id not in already_used and vid_id not in seen and 0 < duration <= 60:
+                    candidates.append({
+                        "video_id": vid_id,
+                        "url":      f"https://www.youtube.com/watch?v={vid_id}",
+                        "title":    title,
+                        "duration": int(duration),
+                        "timestamp": 0,
+                    })
 
         log.info(f"[slicer] Found {len(candidates)} unprocessed short(s) (<= 60s)")
 
