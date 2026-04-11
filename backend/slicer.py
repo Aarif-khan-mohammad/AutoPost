@@ -88,31 +88,42 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
     Picks today's if available, otherwise most recent unprocessed.
     """
     from datetime import datetime, timezone
+    import subprocess as _sp
+    import sys as _sys
 
     base_url = channel_url.rstrip("/")
-    opts = {
-        "quiet":        True,
-        "extract_flat": "discard_in_playlist",
-        "playlistend":  50,
-        "noplaylist":   False,
-        "http_headers": _YT_HEADERS,
-    }
 
     candidates = []
     try:
         log.info(f"[slicer] Scanning channel: {base_url}")
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(base_url + "/videos", download=False)
-        for entry in (info.get("entries") or []):
-            vid_id   = entry.get("id", "")
-            duration = int(entry.get("duration") or 0)
+        # Use subprocess to avoid yt-dlp sys.exit() issue with extract_flat on channel URLs
+        import subprocess as _sp
+        result = _sp.run(
+            [
+                _sys.executable, "-m", "yt_dlp",
+                "--flat-playlist", "--print", "%(id)s\t%(duration)s\t%(title)s",
+                "--playlist-end", "50", "--quiet",
+                base_url + "/videos",
+            ],
+            capture_output=True, text=True, timeout=60
+        )
+        for line in result.stdout.strip().splitlines():
+            parts = line.split("\t", 2)
+            if len(parts) < 2:
+                continue
+            vid_id   = parts[0].strip()
+            try:
+                duration = float(parts[1].strip() or 0)
+            except ValueError:
+                duration = 0
+            title = parts[2].strip() if len(parts) > 2 else ""
             if vid_id and vid_id not in already_used and 0 < duration <= 60:
                 candidates.append({
                     "video_id":  vid_id,
                     "url":       f"https://www.youtube.com/watch?v={vid_id}",
-                    "title":     entry.get("title", ""),
-                    "duration":  duration,
-                    "timestamp": int(entry.get("timestamp") or 0),
+                    "title":     title,
+                    "duration":  int(duration),
+                    "timestamp": 0,
                 })
         log.info(f"[slicer] Found {len(candidates)} unprocessed short(s) (<= 60s)")
     except Exception as e:
