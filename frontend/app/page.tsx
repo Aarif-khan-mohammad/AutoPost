@@ -7,7 +7,7 @@ export default function Home() {
       <div className="mb-8 text-center">
         <h1 className="text-3xl font-bold tracking-tight">AutoPost</h1>
         <p className="mt-2 text-zinc-400 text-sm">
-          AI-powered YouTube Shorts automation
+          AI-powered YouTube Shorts &amp; Instagram Reels automation
         </p>
       </div>
       <div className="w-full max-w-lg space-y-6">

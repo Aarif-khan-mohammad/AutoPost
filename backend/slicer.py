@@ -195,26 +195,23 @@ def download_video(video_url: str, job_id: str) -> str:
 
 # ── 3. Gemini — find best 60s in the full video ───────────────────────────────
 
-def analyze_with_gemini(video_path: str, duration: int) -> tuple[float, str, list[str]]:
-    # Try models in order — each has its own free-tier quota
+def analyze_with_gemini(video_path: str, duration: int, platform: str = "youtube") -> tuple[float, str, list[str]]:
     models_to_try = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite", "gemini-2.0-flash"]
-
     for model_name in models_to_try:
         try:
-            return _call_gemini(model_name, video_path, duration)
+            return _call_gemini(model_name, video_path, duration, platform)
         except Exception as e:
             msg = str(e)
             if "429" in msg or "quota" in msg.lower():
                 log.warning(f"[slicer] Gemini {model_name} quota exceeded, trying next...")
                 continue
             raise
-
     raise RuntimeError("All Gemini models quota exceeded. Wait a minute and retry.")
 
 
-def _call_gemini(model_name: str, video_path: str, duration: int) -> tuple[float, str, list[str]]:
+def _call_gemini(model_name: str, video_path: str, duration: int, platform: str = "youtube") -> tuple[float, str, list[str]]:
     model = genai.GenerativeModel(model_name)
-    log.info(f"[slicer] Uploading to Gemini ({model_name}), duration={duration}s")
+    log.info(f"[slicer] Uploading to Gemini ({model_name}), duration={duration}s platform={platform}")
     video_file = genai.upload_file(path=video_path, mime_type="video/mp4")
 
     for _ in range(30):
@@ -225,29 +222,36 @@ def _call_gemini(model_name: str, video_path: str, duration: int) -> tuple[float
     else:
         raise RuntimeError("Gemini file never became ACTIVE.")
 
-    log.info(f"[slicer] Gemini file ACTIVE, generating content...")
-
     is_short  = duration <= 60
     max_start = max(0, duration - CLIP_DURATION)
 
-    if is_short:
-        prompt = """This is a YouTube Short. Generate a viral caption and hashtags for it.
+    platform_context = (
+        "YouTube Shorts algorithm rewards: strong hook in first 3s, high retention, trending audio, relatable moments."
+        if platform == "youtube" else
+        "Instagram Reels algorithm rewards: visually striking opener, trending audio, emotional reaction, shareable moments."
+    )
 
-Reply EXACTLY in this format (no extra text):
+    if is_short:
+        prompt = f"""This is a short-form video for {platform.upper()}.
+{platform_context}
+Generate a viral caption and hashtags optimized for {platform.upper()}.
+
+Reply EXACTLY in this format:
 START_TIME: 0
 CAPTION: <catchy caption under 150 chars, no hashtags>
-HASHTAGS: <tag1>, <tag2>, <tag3>, <tag4>"""
+HASHTAGS: <tag1>, <tag2>, <tag3>, <tag4>, <tag5>"""
     else:
-        prompt = f"""You are a viral short-form content editor.
+        prompt = f"""You are a viral short-form content editor for {platform.upper()}.
+{platform_context}
 This video is {duration} seconds long.
-Find the single BEST {CLIP_DURATION}-second segment to post as a YouTube Short.
-Prioritize: strong hook in first 3 seconds, high energy, emotion, or surprise.
-Avoid intros, outros, sponsor segments, and slow parts.
+Find the single BEST {CLIP_DURATION}-second segment.
+Prioritize: strong hook in first 3s, high energy, emotion, or surprise.
+Avoid intros, outros, sponsor segments.
 
-Reply EXACTLY in this format (no extra text):
+Reply EXACTLY in this format:
 START_TIME: <integer seconds, 0-{max_start}>
 CAPTION: <catchy caption under 150 chars, no hashtags>
-HASHTAGS: <tag1>, <tag2>, <tag3>, <tag4>"""
+HASHTAGS: <tag1>, <tag2>, <tag3>, <tag4>, <tag5>"""
 
     response = model.generate_content([video_file, prompt])
     text = response.text.strip()
@@ -255,7 +259,7 @@ HASHTAGS: <tag1>, <tag2>, <tag3>, <tag4>"""
 
     start_time = 0.0
     caption    = "You need to see this 🔥"
-    hashtags   = ["viral", "trending", "shorts", "youtube"]
+    hashtags   = ["viral", "trending", "shorts", platform, "fyp"]
 
     if m := re.search(r"START_TIME:\s*(\d+(?:\.\d+)?)", text):
         start_time = float(m.group(1))
@@ -264,7 +268,7 @@ HASHTAGS: <tag1>, <tag2>, <tag3>, <tag4>"""
     if m := re.search(r"HASHTAGS:\s*(.+)", text):
         hashtags = [h.strip().lstrip("#") for h in m.group(1).split(",")]
 
-    log.info(f"[slicer] Parsed — start={start_time}s caption='{caption}' hashtags={hashtags}")
+    log.info(f"[slicer] Parsed — start={start_time}s caption='{caption}'")
     return min(max(0.0, start_time), float(max_start)), caption, hashtags
 
 
@@ -297,6 +301,7 @@ def process_channel(
     job_id: str,
     already_used: list[str],
     on_step=None,
+    platform: str = "youtube",
 ) -> tuple[str, str, list[str], dict]:
     """
     1. Pick next unprocessed video from channel
@@ -318,10 +323,9 @@ def process_channel(
 
     step("analyzing")
     if is_short:
-        # Already a Short — use full clip, still generate caption/hashtags
-        start, caption, hashtags = 0.0, *analyze_with_gemini(source, video_info["duration"])[1:]
+        start, caption, hashtags = 0.0, *analyze_with_gemini(source, video_info["duration"], platform)[1:]
     else:
-        start, caption, hashtags = analyze_with_gemini(source, video_info["duration"])
+        start, caption, hashtags = analyze_with_gemini(source, video_info["duration"], platform)
 
     step("slicing")
     output = export_vertical(source, start, job_id)
