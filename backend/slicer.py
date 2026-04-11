@@ -105,7 +105,7 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
                 "--playlist-end", "50", "--quiet",
                 base_url + "/videos",
             ],
-            capture_output=True, text=True, timeout=60
+            stdout=_sp.PIPE, stderr=_sp.DEVNULL, text=True, timeout=60
         )
         for line in result.stdout.strip().splitlines():
             parts = line.split("\t", 2)
