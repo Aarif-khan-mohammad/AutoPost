@@ -5,6 +5,7 @@ import base64
 import logging
 import subprocess
 import tempfile
+import urllib.parse
 import yt_dlp
 import imageio_ffmpeg
 import google.generativeai as genai
@@ -35,9 +36,8 @@ def _get_cookies_file() -> str | None:
     if not b64:
         return None
     try:
-        # Strip PEM headers and all whitespace/newlines before decoding
-        b64_clean = re.sub(r"-{5}.*?-{5}", "", b64)  # remove -----BEGIN/END ...-----
-        b64_clean = re.sub(r"\s+", "", b64_clean)      # remove all whitespace
+        b64_clean = re.sub(r"-{5}.*?-{5}", "", b64)
+        b64_clean = re.sub(r"\s+", "", b64_clean)
         data = base64.b64decode(b64_clean)
         tmp  = tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode="wb")
         tmp.write(data)
@@ -46,6 +46,31 @@ def _get_cookies_file() -> str | None:
         return tmp.name
     except Exception as e:
         log.warning(f"[slicer] Failed to decode cookies: {e}")
+        return None
+
+
+def _get_oauth_token() -> str | None:
+    """Get a fresh access token from the stored refresh token."""
+    refresh_token = os.getenv("YOUTUBE_REFRESH_TOKEN", "").strip()
+    client_id     = os.getenv("YOUTUBE_CLIENT_ID", "").strip()
+    client_secret = os.getenv("YOUTUBE_CLIENT_SECRET", "").strip()
+    if not all([refresh_token, client_id, client_secret]):
+        return None
+    try:
+        import urllib.request, json as _json
+        data = urllib.parse.urlencode({
+            "client_id":     client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type":    "refresh_token",
+        }).encode()
+        req  = urllib.request.Request("https://oauth2.googleapis.com/token", data=data)
+        resp = urllib.request.urlopen(req, timeout=10)
+        token = _json.loads(resp.read())["access_token"]
+        log.info("[slicer] Got fresh OAuth access token")
+        return token
+    except Exception as e:
+        log.warning(f"[slicer] OAuth token refresh failed: {e}")
         return None
 
 
@@ -102,17 +127,17 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
 # ── 2. Download full video ────────────────────────────────────────────────────
 
 _DOWNLOAD_ATTEMPTS = [
-    ("android",    "bestvideo[height<=1080]+bestaudio/best[height<=1080]", False),
-    ("android_vr", "bestvideo[height<=1080]+bestaudio/best[height<=1080]", False),
-    ("mweb",       "bestvideo[height<=720]+bestaudio/best[height<=720]/best", True),
-    ("web",        "bestvideo[height<=720]+bestaudio/best[height<=720]/18/best", True),
+    ("android",    "bestvideo[height<=1080]+bestaudio/best[height<=1080]"),
+    ("android_vr", "bestvideo[height<=1080]+bestaudio/best[height<=1080]"),
+    ("mweb",       "bestvideo[height<=720]+bestaudio/best[height<=720]/best"),
+    ("web",        "bestvideo[height<=720]+bestaudio/best[height<=720]/18/best"),
 ]
 
 
 def download_video(video_url: str, job_id: str) -> str:
-    out          = os.path.join(DOWNLOADS_DIR, f"{job_id}_source.mp4")
-    cookies_file = _get_cookies_file()
-    proxy        = os.getenv("YTDLP_PROXY", "").strip() or None
+    out   = os.path.join(DOWNLOADS_DIR, f"{job_id}_source.mp4")
+    proxy = os.getenv("YTDLP_PROXY", "").strip() or None
+    token = _get_oauth_token()
     if os.path.exists(out):
         os.remove(out)
 
@@ -129,8 +154,12 @@ def download_video(video_url: str, job_id: str) -> str:
     if proxy:
         base["proxy"] = proxy
         log.info(f"[slicer] Using proxy: {proxy[:40]}...")
+    if token:
+        # Pass OAuth token as Bearer header — works from any IP, no cookies needed
+        base["http_headers"] = {**_YT_HEADERS, "Authorization": f"Bearer {token}"}
+        log.info("[slicer] Using OAuth Bearer token for auth")
 
-    for client, fmt, use_cookies in _DOWNLOAD_ATTEMPTS:
+    for client, fmt in _DOWNLOAD_ATTEMPTS:
         try:
             log.info(f"[slicer] Trying {client} client: {video_url}")
             opts = {
@@ -138,8 +167,6 @@ def download_video(video_url: str, job_id: str) -> str:
                 "format": fmt,
                 "extractor_args": {"youtube": {"player_client": [client]}},
             }
-            if use_cookies and cookies_file:
-                opts["cookiefile"] = cookies_file
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([video_url])
             if os.path.exists(out) and os.path.getsize(out) > 10_000:
