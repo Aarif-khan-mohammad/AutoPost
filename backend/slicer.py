@@ -94,38 +94,17 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
 
     # Prefer Shorts, then fall back to regular videos
     shorts = [v for v in candidates if 0 < v["duration"] <= 60]
-    ordered = shorts + [v for v in candidates if v not in shorts]
-
-    cookies_file = _get_cookies_file()
-    check_opts = {
-        "quiet": True,
-        "skip_download": True,
-        "noplaylist": True,
-        "http_headers": _YT_HEADERS,
-    }
-    if cookies_file:
-        check_opts["cookiefile"] = cookies_file
-
-    for video in ordered:
-        try:
-            with yt_dlp.YoutubeDL(check_opts) as ydl:
-                meta = ydl.extract_info(video["url"], download=False)
-            if meta.get("formats"):
-                log.info(f"[slicer] Selected: '{video['title']}' ({video['duration']}s) — {video['url']}")
-                return video
-            else:
-                log.warning(f"[slicer] Skipping {video['video_id']} — no downloadable formats")
-        except Exception as e:
-            log.warning(f"[slicer] Skipping {video['video_id']} — format check failed: {e}")
-
-    raise RuntimeError("No downloadable videos found in recent uploads.")
+    chosen = shorts[0] if shorts else candidates[0]
+    log.info(f"[slicer] Selected: '{chosen['title']}' ({chosen['duration']}s) — {chosen['url']}")
+    return chosen
 
 
 # ── 2. Download full video ────────────────────────────────────────────────────
 
 _DOWNLOAD_ATTEMPTS = [
+    ("mweb",        "bestvideo[height<=720]+bestaudio/best[height<=720]/best"),
+    ("android",     "bestvideo[height<=1080]+bestaudio/best[height<=1080]"),
     ("android_vr",  "bestvideo[height<=1080]+bestaudio/best[height<=1080]"),
-    ("tv_embedded", "bestvideo[height<=1080]+bestaudio/best[height<=1080]"),
     ("web",         "bestvideo[height<=720]+bestaudio/best[height<=720]/18/best"),
 ]
 
@@ -145,6 +124,8 @@ def download_video(video_url: str, job_id: str) -> str:
         "retries":             3,
         "http_headers":        _YT_HEADERS,
         "ffmpeg_location":     os.path.dirname(FFMPEG),
+        "sleep_interval":      2,
+        "max_sleep_interval":  5,
     }
     if cookies_file:
         base["cookiefile"] = cookies_file
@@ -166,6 +147,7 @@ def download_video(video_url: str, job_id: str) -> str:
             log.warning(f"[slicer] {client} failed: {e}")
         if os.path.exists(out):
             os.remove(out)
+        time.sleep(5)  # back off before next attempt
 
     raise RuntimeError(f"Could not download: {video_url}")
 
