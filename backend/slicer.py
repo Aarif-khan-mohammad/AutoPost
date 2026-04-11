@@ -92,7 +92,7 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
     base_url = channel_url.rstrip("/")
     opts = {
         "quiet":        True,
-        "extract_flat": "in_playlist",
+        "extract_flat": "discard_in_playlist",
         "playlistend":  50,
         "noplaylist":   False,
         "http_headers": _YT_HEADERS,
