@@ -84,64 +84,84 @@ def _get_oauth_token() -> str | None:
 
 def get_next_video(channel_url: str, already_used: list[str]) -> dict:
     """
-    Scans main channel feed, filters videos <= 60s (Shorts).
-    Picks today's if available, otherwise most recent unprocessed.
+    Scans channel /videos tab via yt-dlp subprocess.
+    Filters videos <= 60s (Shorts), picks most recent unprocessed.
     """
-    from datetime import datetime, timezone
-    import subprocess as _sp
     import sys as _sys
+    import tempfile as _tmp
 
     base_url = channel_url.rstrip("/")
-
     candidates = []
+
     try:
-        log.info(f"[slicer] Scanning channel: {base_url}")
-        # Use subprocess to avoid yt-dlp sys.exit() issue with extract_flat on channel URLs
-        import subprocess as _sp
-        result = _sp.run(
+        log.info(f"[slicer] Scanning channel: {base_url}/videos")
+        # Write to temp file to avoid Windows stdout pipe issues
+        with _tmp.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            tmp_path = f.name
+
+        ret = subprocess.call(
             [
                 _sys.executable, "-m", "yt_dlp",
-                "--flat-playlist", "--print", "%(id)s\t%(duration)s\t%(title)s",
-                "--playlist-end", "50", "--quiet",
+                "--flat-playlist",
+                "--print", "%(id)s\t%(duration)s\t%(upload_date)s\t%(title)s",
+                "--playlist-end", "50",
+                "--quiet",
                 base_url + "/videos",
             ],
-            stdout=_sp.PIPE, stderr=_sp.DEVNULL, text=True, timeout=60
+            stdout=open(tmp_path, "w"),
+            stderr=subprocess.DEVNULL,
         )
-        for line in result.stdout.strip().splitlines():
-            parts = line.split("\t", 2)
+
+        with open(tmp_path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.read().strip().splitlines()
+        os.unlink(tmp_path)
+
+        log.info(f"[slicer] Raw lines from yt-dlp: {len(lines)}")
+
+        for line in lines:
+            parts = line.split("\t", 3)
             if len(parts) < 2:
                 continue
-            vid_id   = parts[0].strip()
+            vid_id = parts[0].strip()
             try:
                 duration = float(parts[1].strip() or 0)
             except ValueError:
                 duration = 0
-            title = parts[2].strip() if len(parts) > 2 else ""
+            upload_date = parts[2].strip() if len(parts) > 2 else ""
+            title = parts[3].strip() if len(parts) > 3 else ""
+
             if vid_id and vid_id not in already_used and 0 < duration <= 60:
+                # Parse upload_date YYYYMMDD -> timestamp
+                ts = 0
+                try:
+                    from datetime import datetime, timezone
+                    ts = int(datetime.strptime(upload_date, "%Y%m%d").replace(tzinfo=timezone.utc).timestamp())
+                except Exception:
+                    pass
                 candidates.append({
                     "video_id":  vid_id,
                     "url":       f"https://www.youtube.com/watch?v={vid_id}",
                     "title":     title,
                     "duration":  int(duration),
-                    "timestamp": 0,
+                    "timestamp": ts,
                 })
+
         log.info(f"[slicer] Found {len(candidates)} unprocessed short(s) (<= 60s)")
+
     except Exception as e:
         log.warning(f"[slicer] Channel scan error: {e}")
 
     if not candidates:
         raise RuntimeError("No new shorts found — all recent uploads already processed.")
 
-    # Sort newest first
+    # Sort newest first, pick today's if available else most recent
+    from datetime import datetime, timezone
     candidates.sort(key=lambda v: v["timestamp"], reverse=True)
-
     today = datetime.now(timezone.utc).date()
     todays = [
         v for v in candidates
-        if v["timestamp"] and
-        datetime.fromtimestamp(v["timestamp"], tz=timezone.utc).date() == today
+        if v["timestamp"] and datetime.fromtimestamp(v["timestamp"], tz=timezone.utc).date() == today
     ]
-
     chosen = todays[0] if todays else candidates[0]
     upload_date = (
         datetime.fromtimestamp(chosen["timestamp"], tz=timezone.utc).date()
