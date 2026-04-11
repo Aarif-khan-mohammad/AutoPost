@@ -99,13 +99,14 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(feed, download=False)
             for entry in (info.get("entries") or []):
-                vid_id = entry.get("id", "")
-                if vid_id and vid_id not in already_used:
+                vid_id   = entry.get("id", "")
+                duration = int(entry.get("duration") or 0)
+                if vid_id and vid_id not in already_used and duration > 0:
                     candidates.append({
                         "video_id": vid_id,
                         "url":      f"https://www.youtube.com/watch?v={vid_id}",
                         "title":    entry.get("title", ""),
-                        "duration": int(entry.get("duration") or 0),
+                        "duration": duration,
                     })
             log.info(f"[slicer] Found {len(candidates)} new candidate(s) in {feed}")
         except Exception as e:
