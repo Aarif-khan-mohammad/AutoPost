@@ -102,10 +102,10 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
 # ── 2. Download full video ────────────────────────────────────────────────────
 
 _DOWNLOAD_ATTEMPTS = [
-    ("mweb",       "bestvideo[height<=720]+bestaudio/best[height<=720]/best"),
-    ("android",    "bestvideo[height<=1080]+bestaudio/best[height<=1080]"),
-    ("android_vr", "bestvideo[height<=1080]+bestaudio/best[height<=1080]"),
-    ("web",        "bestvideo[height<=720]+bestaudio/best[height<=720]/18/best"),
+    ("android",    "bestvideo[height<=1080]+bestaudio/best[height<=1080]", False),
+    ("android_vr", "bestvideo[height<=1080]+bestaudio/best[height<=1080]", False),
+    ("mweb",       "bestvideo[height<=720]+bestaudio/best[height<=720]/best", True),
+    ("web",        "bestvideo[height<=720]+bestaudio/best[height<=720]/18/best", True),
 ]
 
 
@@ -126,13 +126,11 @@ def download_video(video_url: str, job_id: str) -> str:
         "http_headers":        _YT_HEADERS,
         "ffmpeg_location":     os.path.dirname(FFMPEG),
     }
-    if cookies_file:
-        base["cookiefile"] = cookies_file
     if proxy:
         base["proxy"] = proxy
         log.info(f"[slicer] Using proxy: {proxy[:40]}...")
 
-    for client, fmt in _DOWNLOAD_ATTEMPTS:
+    for client, fmt, use_cookies in _DOWNLOAD_ATTEMPTS:
         try:
             log.info(f"[slicer] Trying {client} client: {video_url}")
             opts = {
@@ -140,6 +138,8 @@ def download_video(video_url: str, job_id: str) -> str:
                 "format": fmt,
                 "extractor_args": {"youtube": {"player_client": [client]}},
             }
+            if use_cookies and cookies_file:
+                opts["cookiefile"] = cookies_file
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([video_url])
             if os.path.exists(out) and os.path.getsize(out) > 10_000:
