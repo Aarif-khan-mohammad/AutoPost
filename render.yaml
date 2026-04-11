@@ -26,3 +26,5 @@ services:
         value: "Asia/Kolkata"
       - key: FRONTEND_URL
         sync: false
+      - key: YOUTUBE_COOKIES_B64
+        sync: false

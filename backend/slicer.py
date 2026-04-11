@@ -35,7 +35,10 @@ def _get_cookies_file() -> str | None:
     if not b64:
         return None
     try:
-        data = base64.b64decode(b64)
+        # Strip PEM headers and all whitespace/newlines before decoding
+        b64_clean = re.sub(r"-{5}.*?-{5}", "", b64)  # remove -----BEGIN/END ...-----
+        b64_clean = re.sub(r"\s+", "", b64_clean)      # remove all whitespace
+        data = base64.b64decode(b64_clean)
         tmp  = tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode="wb")
         tmp.write(data)
         tmp.close()
@@ -51,8 +54,7 @@ def _get_cookies_file() -> str | None:
 def get_next_video(channel_url: str, already_used: list[str]) -> dict:
     """
     Check /shorts tab first, then main uploads.
-    Returns first video not in already_used.
-    No duration filter — accepts both Shorts and regular videos.
+    Returns first video not in already_used that has downloadable formats.
     """
     base_url   = channel_url.rstrip("/")
     feeds      = [base_url + "/shorts", base_url]
@@ -85,75 +87,85 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
             log.warning(f"[slicer] Feed {feed} error: {e}")
 
         if candidates:
-            break  # found results in this feed, stop
+            break
 
     if not candidates:
-        raise RuntimeError(
-            "No new videos found — all recent uploads already processed."
-        )
+        raise RuntimeError("No new videos found — all recent uploads already processed.")
 
+    # Prefer Shorts, then fall back to regular videos
     shorts = [v for v in candidates if 0 < v["duration"] <= 60]
-    chosen = shorts[0] if shorts else candidates[0]
-    log.info(f"[slicer] Selected: '{chosen['title']}' ({chosen['duration']}s) — {chosen['url']}")
-    return chosen
+    ordered = shorts + [v for v in candidates if v not in shorts]
+
+    cookies_file = _get_cookies_file()
+    check_opts = {
+        "quiet": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "http_headers": _YT_HEADERS,
+    }
+    if cookies_file:
+        check_opts["cookiefile"] = cookies_file
+
+    for video in ordered:
+        try:
+            with yt_dlp.YoutubeDL(check_opts) as ydl:
+                meta = ydl.extract_info(video["url"], download=False)
+            if meta.get("formats"):
+                log.info(f"[slicer] Selected: '{video['title']}' ({video['duration']}s) — {video['url']}")
+                return video
+            else:
+                log.warning(f"[slicer] Skipping {video['video_id']} — no downloadable formats")
+        except Exception as e:
+            log.warning(f"[slicer] Skipping {video['video_id']} — format check failed: {e}")
+
+    raise RuntimeError("No downloadable videos found in recent uploads.")
 
 
 # ── 2. Download full video ────────────────────────────────────────────────────
 
+_DOWNLOAD_ATTEMPTS = [
+    ("android_vr",  "bestvideo[height<=1080]+bestaudio/best[height<=1080]"),
+    ("tv_embedded", "bestvideo[height<=1080]+bestaudio/best[height<=1080]"),
+    ("web",         "bestvideo[height<=720]+bestaudio/best[height<=720]/18/best"),
+]
+
+
 def download_video(video_url: str, job_id: str) -> str:
-    out         = os.path.join(DOWNLOADS_DIR, f"{job_id}_source.mp4")
+    out          = os.path.join(DOWNLOADS_DIR, f"{job_id}_source.mp4")
     cookies_file = _get_cookies_file()
     if os.path.exists(out):
         os.remove(out)
 
     base = {
-        "outtmpl":              out,
-        "merge_output_format":  "mp4",
-        "quiet":                False,
-        "noplaylist":           True,
-        "socket_timeout":       30,
-        "retries":              3,
-        "http_headers":         _YT_HEADERS,
-        "ffmpeg_location":      os.path.dirname(FFMPEG),
+        "outtmpl":             out,
+        "merge_output_format": "mp4",
+        "quiet":               False,
+        "noplaylist":          True,
+        "socket_timeout":      30,
+        "retries":             3,
+        "http_headers":        _YT_HEADERS,
+        "ffmpeg_location":     os.path.dirname(FFMPEG),
     }
     if cookies_file:
         base["cookiefile"] = cookies_file
 
-    # Attempt 1 — android_vr client (no cookies — client doesn't support them)
-    try:
-        log.info(f"[slicer] Downloading via android_vr client: {video_url}")
-        opts = {
-            **base,
-            "format": "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-            "extractor_args": {"youtube": {"player_client": ["android_vr"]}},
-        }
-        opts.pop("cookiefile", None)  # android_vr doesn't support cookies
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.download([video_url])
-        if os.path.exists(out) and os.path.getsize(out) > 10_000:
-            log.info(f"[slicer] Download OK ({os.path.getsize(out) // 1024 // 1024} MB): {out}")
-            return out
-    except Exception as e:
-        log.warning(f"[slicer] android_vr failed: {e}")
-    if os.path.exists(out):
-        os.remove(out)
-
-    # Attempt 2 — web client with cookies
-    try:
-        log.info(f"[slicer] Falling back to web client: {video_url}")
-        opts = {
-            **base,
-            "format": "bestvideo[height<=720]+bestaudio/best[height<=720]/18/best",
-            "extractor_args": {"youtube": {"player_client": ["web"]}},
-            "ignore_no_formats_error": True,
-        }
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.download([video_url])
-        if os.path.exists(out) and os.path.getsize(out) > 10_000:
-            log.info(f"[slicer] Download OK ({os.path.getsize(out) // 1024 // 1024} MB): {out}")
-            return out
-    except Exception as e:
-        log.warning(f"[slicer] web client failed: {e}")
+    for client, fmt in _DOWNLOAD_ATTEMPTS:
+        try:
+            log.info(f"[slicer] Trying {client} client: {video_url}")
+            opts = {
+                **base,
+                "format": fmt,
+                "extractor_args": {"youtube": {"player_client": [client]}},
+            }
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.download([video_url])
+            if os.path.exists(out) and os.path.getsize(out) > 10_000:
+                log.info(f"[slicer] Download OK via {client} ({os.path.getsize(out) // 1024 // 1024} MB)")
+                return out
+        except Exception as e:
+            log.warning(f"[slicer] {client} failed: {e}")
+        if os.path.exists(out):
+            os.remove(out)
 
     raise RuntimeError(f"Could not download: {video_url}")
 
