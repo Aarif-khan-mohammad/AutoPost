@@ -13,6 +13,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 log = logging.getLogger("autopost")
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    force=True,
+)
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 DOWNLOADS_DIR = os.getenv("DOWNLOADS_DIR", "/tmp/autopost_downloads")
