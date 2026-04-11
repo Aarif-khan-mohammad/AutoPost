@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const BACKEND_URL = process.env.BACKEND_URL as string;
+const BACKEND_URL = (process.env.BACKEND_URL as string).replace(/\/$/, "");
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
