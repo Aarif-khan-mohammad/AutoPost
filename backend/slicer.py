@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 log = logging.getLogger("autopost")
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     force=True,
@@ -170,10 +170,6 @@ def download_video(video_url: str, job_id: str) -> str:
     if proxy:
         base["proxy"] = proxy
         log.info(f"[slicer] Using proxy: {proxy[:40]}...")
-    if token:
-        # Pass OAuth token as Bearer header — works from any IP, no cookies needed
-        base["http_headers"] = {**_YT_HEADERS, "Authorization": f"Bearer {token}"}
-        log.info("[slicer] Using OAuth Bearer token for auth")
 
     for client, fmt in _DOWNLOAD_ATTEMPTS:
         try:
