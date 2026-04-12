@@ -29,15 +29,15 @@ def publish_to_youtube(
     video_path: str,
     caption: str,
     hashtags: list[str],
-    access_token: str | None = None,   # kept for backward compat, ignored if .env has refresh token
+    access_token: str | None = None,
 ) -> str:
-    # Prefer stored refresh token; fall back to passed access_token
-    if os.getenv("YOUTUBE_REFRESH_TOKEN"):
+    # User token takes priority — if provided, post to their channel
+    if access_token:
+        creds = Credentials(token=access_token)
+    elif os.getenv("YOUTUBE_REFRESH_TOKEN"):
         creds = _get_youtube_creds()
     else:
-        if not access_token:
-            raise ValueError("No YouTube credentials. Run get_youtube_token.py first.")
-        creds = Credentials(token=access_token)
+        raise ValueError("No YouTube credentials. Run get_youtube_token.py first.")
 
     youtube = build("youtube", "v3", credentials=creds)
 
