@@ -239,7 +239,19 @@ def analyze_with_gemini(video_path: str, duration: int, platform: str = "youtube
 def _call_gemini(model_name: str, video_path: str, duration: int, platform: str = "youtube") -> tuple[float, str, list[str]]:
     model = genai.GenerativeModel(model_name)
     log.info(f"[slicer] Uploading to Gemini ({model_name}), duration={duration}s platform={platform}")
-    video_file = genai.upload_file(path=video_path, mime_type="video/mp4")
+
+    # Retry upload up to 3 times for network errors
+    video_file = None
+    for attempt in range(3):
+        try:
+            video_file = genai.upload_file(path=video_path, mime_type="video/mp4")
+            break
+        except Exception as e:
+            log.warning(f"[slicer] Gemini upload attempt {attempt+1} failed: {e}")
+            if attempt < 2:
+                time.sleep(5)
+            else:
+                raise
 
     for _ in range(30):
         video_file = genai.get_file(video_file.name)
