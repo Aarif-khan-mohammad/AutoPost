@@ -113,11 +113,14 @@ def _setup_scheduler(override: dict = None):
 async def scheduled_post(platform: str = "youtube"):
     channel = (_schedule_override.get("channel") or os.getenv("SCHEDULE_CHANNEL_URL", "")).strip()
     if not channel:
+        log.warning("[scheduler] Fired but no channel configured — skipping")
         return
     job_id = str(uuid.uuid4())
-    log.info(f"[scheduler] ⏰ Auto-post platform={platform}")
+    log.info(f"[scheduler] ⏰ Auto-post triggered platform={platform} channel={channel}")
     await create_job(job_id, channel)
-    asyncio.create_task(run_pipeline(job_id, channel, platform=platform))
+    # Use server .env credentials — no per-request token needed
+    req = ProcessRequest(channel_url=channel, platform=platform)
+    asyncio.create_task(run_pipeline(job_id, channel, req, platform=platform))
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
