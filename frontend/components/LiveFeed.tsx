@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { authHeaders } from "@/lib/auth";
 
 type Job = {
   id: string;
@@ -95,7 +96,7 @@ export default function LiveFeed() {
 
   const fetchJobs = async () => {
     try {
-      const res  = await fetch("/api/jobs");
+      const res  = await fetch("/api/jobs", { headers: authHeaders() });
       const data = await res.json();
       // Show only live jobs (queued or processing)
       const live = Array.isArray(data)

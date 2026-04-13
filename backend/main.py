@@ -5,17 +5,22 @@ import logging
 from contextlib import asynccontextmanager
 
 import google.generativeai as genai
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
 
 from database import (
-    init_db, create_job, update_job, get_job,
+    init_db, create_job, update_job, get_job, list_jobs,
     get_processed_video_ids, mark_video_processed, _get_client,
+    create_user, get_user_by_email, get_user_by_id, get_user_post_count,
+)
+from auth import (
+    hash_password, verify_password, create_token,
+    get_current_user, require_admin,
 )
 from slicer import process_channel
 from publisher import publish_to_youtube, publish_to_instagram
@@ -161,7 +166,7 @@ app.add_middleware(
 
 class ProcessRequest(BaseModel):
     channel_url:       str
-    platform:          str = "youtube"   # youtube | instagram | both
+    platform:          str = "youtube"
     youtube_token:     str | None = None
     instagram_token:   str | None = None
     instagram_user_id: str | None = None
@@ -170,9 +175,56 @@ class ProcessRequest(BaseModel):
 class ScheduleConfig(BaseModel):
     channel_url: str
     platform:    str = "both"
-    yt_times:    str = ""   # empty = ask Gemini
+    yt_times:    str = ""
     ig_times:    str = ""
     timezone:    str = "Asia/Kolkata"
+
+
+class SignupRequest(BaseModel):
+    email:    str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email:    str
+    password: str
+
+
+# ── Auth routes ───────────────────────────────────────────────────────────────
+
+@app.post("/api/auth/signup")
+async def signup(req: SignupRequest):
+    existing = await get_user_by_email(req.email)
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    user_id = str(uuid.uuid4())
+    await create_user(user_id, req.email, hash_password(req.password), role="user")
+    token = create_token(user_id, "user")
+    return {"token": token, "user_id": user_id, "role": "user", "email": req.email}
+
+
+@app.post("/api/auth/login")
+async def login(req: LoginRequest):
+    user = await get_user_by_email(req.email)
+    if not user or not verify_password(req.password, user["hashed_password"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    token = create_token(user["id"], user["role"])
+    return {"token": token, "user_id": user["id"], "role": user["role"], "email": user["email"]}
+
+
+@app.get("/api/auth/me")
+async def me(user: dict = Depends(get_current_user)):
+    data = await get_user_by_id(user["user_id"])
+    if not data:
+        raise HTTPException(status_code=404, detail="User not found")
+    post_count = await get_user_post_count(user["user_id"])
+    return {
+        "user_id":    data["id"],
+        "email":      data["email"],
+        "role":       data["role"],
+        "post_count": post_count,
+        "can_post":   data["role"] == "admin" or post_count < 1,
+    }
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -183,33 +235,37 @@ async def health():
 
 
 @app.post("/api/process")
-async def process_video(req: ProcessRequest):
+async def process_video(req: ProcessRequest, user: dict = Depends(get_current_user)):
+    # Enforce 1-post limit for regular users
+    if user["role"] != "admin":
+        count = await get_user_post_count(user["user_id"])
+        if count >= 1:
+            raise HTTPException(
+                status_code=403,
+                detail="Free tier limit reached. You have already made 1 successful post."
+            )
     job_id = str(uuid.uuid4())
-    log.info(f"[api] ▶ Manual post platform={req.platform} channel={req.channel_url}")
-    await create_job(job_id, req.channel_url)
-    asyncio.create_task(run_pipeline(job_id, req.channel_url, req, platform=req.platform))
+    log.info(f"[api] ▶ Manual post user={user['user_id']} role={user['role']} platform={req.platform}")
+    await create_job(job_id, req.channel_url, user_id=user["user_id"])
+    asyncio.create_task(run_pipeline(job_id, req.channel_url, req, platform=req.platform, user_id=user["user_id"]))
     return {"job_id": job_id, "status": "queued"}
 
 
 @app.get("/api/jobs")
-async def list_recent_jobs(limit: int = 10):
-    """Return the most recent jobs for the live feed."""
-    res = (
-        _get_client()
-        .table("jobs")
-        .select("*")
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
-    )
-    return res.data or []
+async def list_recent_jobs(user: dict = Depends(get_current_user)):
+    # Admin sees all jobs; users see only their own
+    uid = None if user["role"] == "admin" else user["user_id"]
+    return await list_jobs(user_id=uid, limit=10)
 
 
 @app.get("/api/jobs/{job_id}")
-async def get_job_status(job_id: str):
+async def get_job_status(job_id: str, user: dict = Depends(get_current_user)):
     job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    # Users can only see their own jobs
+    if user["role"] != "admin" and job.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
     return job
 
 
@@ -322,8 +378,8 @@ async def get_schedule():
 
 # ── Pipeline ──────────────────────────────────────────────────────────────────
 
-async def run_pipeline(job_id: str, channel_url: str, req: ProcessRequest | None = None, platform: str = "youtube"):
-    log.info(f"[pipeline] 🚀 Job {job_id} platform={platform} channel={channel_url}")
+async def run_pipeline(job_id: str, channel_url: str, req: ProcessRequest | None = None, platform: str = "youtube", user_id: str = "system"):
+    log.info(f"[pipeline] 🚀 Job {job_id} user={user_id} platform={platform} channel={channel_url}")
     try:
         loop = asyncio.get_event_loop()
 
@@ -331,14 +387,14 @@ async def run_pipeline(job_id: str, channel_url: str, req: ProcessRequest | None
             asyncio.run_coroutine_threadsafe(update_job(job_id, status="processing", step=name), loop)
 
         await update_job(job_id, status="processing", step="downloading")
-        already_used = await get_processed_video_ids(channel_url)
+        already_used = await get_processed_video_ids(channel_url, user_id=user_id)
 
         output_path, caption, hashtags, video_info = await asyncio.to_thread(
             process_channel, channel_url, job_id, already_used, sync_step, platform
         )
 
         log.info(f"[pipeline] ✂ Clip ready: '{video_info['title']}' ({video_info['duration']}s)")
-        await mark_video_processed(channel_url, video_info["video_id"], video_info["title"])
+        await mark_video_processed(channel_url, video_info["video_id"], video_info["title"], user_id=user_id)
         await update_job(job_id, status="processing", step="publishing")
 
         results = {

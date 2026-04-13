@@ -12,3 +12,5 @@ python-multipart
 apscheduler
 pytz
 imageio-ffmpeg
+python-jose[cryptography]
+passlib[bcrypt]
