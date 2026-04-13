@@ -211,6 +211,22 @@ async def update_schedule(cfg: ScheduleConfig):
     return {"status": "updated", "channel": cfg.channel_url, "yt_times": yt, "ig_times": ig, "timezone": cfg.timezone}
 
 
+@app.get("/api/schedule/suggest")
+async def suggest_times(timezone: str = "Asia/Kolkata"):
+    """Ask Gemini for best posting times and return them — frontend uses these to pre-fill fields."""
+    yt, ig = await asyncio.to_thread(_gemini_best_times, timezone)
+    # Return first time from each as the recommended test time
+    yt_first = yt.split(",")[0].strip()
+    ig_first = ig.split(",")[0].strip()
+    return {
+        "yt_times":      yt,
+        "ig_times":      ig,
+        "yt_first":      yt_first,
+        "ig_first":      ig_first,
+        "suggested_test": yt_first,   # recommended one-time test time
+    }
+
+
 @app.post("/api/schedule/once")
 async def schedule_once(payload: dict):
     """

@@ -33,6 +33,8 @@ export default function SchedulePanel() {
   const [saving, setSaving]       = useState(false);
   const [saved, setSaved]         = useState(false);
   const [useGemini, setUseGemini] = useState(true);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestion, setSuggestion] = useState<{yt_times:string; ig_times:string; suggested_test:string} | null>(null);
 
   // One-time post state
   const [onceChannel, setOnceChannel] = useState("");
@@ -40,6 +42,22 @@ export default function SchedulePanel() {
   const [onceTime, setOnceTime]       = useState("");
   const [onceSaving, setOnceSaving]   = useState(false);
   const [onceDone, setOnceDone]       = useState("");
+
+  const fetchSuggestion = async () => {
+    setSuggesting(true);
+    try {
+      const res  = await fetch(`/api/schedule/suggest?timezone=${encodeURIComponent(tz)}`);
+      const data = await res.json();
+      setSuggestion(data);
+      // Auto-fill recurring times
+      setYtTimes(data.yt_times);
+      setIgTimes(data.ig_times);
+      // Auto-fill one-time test time with Gemini's first recommended time
+      setOnceTime(data.suggested_test);
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   const load = async () => {
     const res  = await fetch("/api/schedule");
@@ -198,6 +216,23 @@ export default function SchedulePanel() {
             </div>
             <span className="text-xs text-zinc-400">🤖 Let Gemini pick best posting times</span>
           </label>
+
+          {useGemini && (
+            <div className="space-y-2">
+              <button onClick={fetchSuggestion} disabled={suggesting}
+                className="w-full rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-40 transition-all">
+                {suggesting ? "⏳ Asking Gemini…" : "🤖 Get AI-Recommended Times"}
+              </button>
+              {suggestion && (
+                <div className="rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 space-y-1">
+                  <p className="text-xs text-zinc-500 font-medium">Gemini suggests:</p>
+                  <p className="text-xs text-zinc-300">🎬 YouTube: <span className="text-indigo-300 font-mono">{suggestion.yt_times}</span></p>
+                  <p className="text-xs text-zinc-300">📸 Instagram: <span className="text-pink-300 font-mono">{suggestion.ig_times}</span></p>
+                  <p className="text-xs text-amber-400">⏰ Test time auto-filled: <span className="font-mono">{suggestion.suggested_test}</span></p>
+                </div>
+              )}
+            </div>
+          )}
 
           {!useGemini && (
             <div className="space-y-2">
