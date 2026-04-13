@@ -15,7 +15,7 @@ import pytz
 
 from database import (
     init_db, create_job, update_job, get_job,
-    get_processed_video_ids, mark_video_processed,
+    get_processed_video_ids, mark_video_processed, _get_client,
 )
 from slicer import process_channel
 from publisher import publish_to_youtube, publish_to_instagram
@@ -177,6 +177,20 @@ async def process_video(req: ProcessRequest):
     await create_job(job_id, req.channel_url)
     asyncio.create_task(run_pipeline(job_id, req.channel_url, req, platform=req.platform))
     return {"job_id": job_id, "status": "queued"}
+
+
+@app.get("/api/jobs")
+async def list_recent_jobs(limit: int = 10):
+    """Return the most recent jobs for the live feed."""
+    res = (
+        _get_client()
+        .table("jobs")
+        .select("*")
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return res.data or []
 
 
 @app.get("/api/jobs/{job_id}")
