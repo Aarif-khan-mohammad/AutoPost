@@ -110,7 +110,13 @@ def _setup_scheduler(override: dict = None):
     log.info(f"[scheduler] Active — channel: {channel}")
 
 
-async def scheduled_post(platform: str = "youtube", channel_override: str = ""):
+async def scheduled_post(
+    platform: str = "youtube",
+    channel_override: str = "",
+    yt_token: str | None = None,
+    ig_token: str | None = None,
+    ig_uid:   str | None = None,
+):
     channel = channel_override.strip() or (_schedule_override.get("channel") or os.getenv("SCHEDULE_CHANNEL_URL", "")).strip()
     if not channel:
         log.warning("[scheduler] Fired but no channel configured — skipping")
@@ -118,7 +124,13 @@ async def scheduled_post(platform: str = "youtube", channel_override: str = ""):
     job_id = str(uuid.uuid4())
     log.info(f"[scheduler] ⏰ Auto-post triggered platform={platform} channel={channel}")
     await create_job(job_id, channel)
-    req = ProcessRequest(channel_url=channel, platform=platform)
+    req = ProcessRequest(
+        channel_url=channel,
+        platform=platform,
+        youtube_token=yt_token,
+        instagram_token=ig_token,
+        instagram_user_id=ig_uid,
+    )
     asyncio.create_task(run_pipeline(job_id, channel, req, platform=platform))
 
 
@@ -243,35 +255,43 @@ async def suggest_times(timezone: str = "Asia/Kolkata"):
 
 @app.post("/api/schedule/once")
 async def schedule_once(payload: dict):
-    """
-    Schedule a single one-time post at a specific datetime.
-    Body: { channel_url, datetime: 'YYYY-MM-DDTHH:MM', timezone }
-    """
     from apscheduler.triggers.date import DateTrigger
     from datetime import datetime
 
     channel  = payload.get("channel_url", "").strip()
-    dt_str   = payload.get("datetime", "")       # e.g. '2025-04-11T08:35'
+    dt_str   = payload.get("datetime", "")
     tz_name  = payload.get("timezone", "Asia/Kolkata")
+    platform = payload.get("platform", "youtube")
+    # User credentials (optional — used when user provides their own tokens)
+    yt_token  = payload.get("youtube_token") or None
+    ig_token  = payload.get("instagram_token") or None
+    ig_uid    = payload.get("instagram_user_id") or None
 
     if not channel or not dt_str:
         raise HTTPException(status_code=400, detail="channel_url and datetime are required")
 
     try:
-        tz      = pytz.timezone(tz_name)
-        run_at  = tz.localize(datetime.strptime(dt_str, "%Y-%m-%dT%H:%M"))
+        tz     = pytz.timezone(tz_name)
+        run_at = tz.localize(datetime.strptime(dt_str, "%Y-%m-%dT%H:%M"))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid datetime or timezone: {e}")
 
-    job_id_tag = f"once_{run_at.strftime('%H%M')}"
+    # Use timestamp + channel hash for unique job id so multiple slots don't collide
+    job_id_tag = f"once_{run_at.strftime('%Y%m%d_%H%M')}_{abs(hash(channel)) % 9999:04d}"
     scheduler.add_job(
         scheduled_post,
         DateTrigger(run_date=run_at),
         id=job_id_tag,
         replace_existing=True,
-        kwargs={"platform": "youtube", "channel_override": channel},
+        kwargs={
+            "platform":         platform,
+            "channel_override": channel,
+            "yt_token":         yt_token,
+            "ig_token":         ig_token,
+            "ig_uid":           ig_uid,
+        },
     )
-    log.info(f"[scheduler] One-time post scheduled at {run_at} for {channel}")
+    log.info(f"[scheduler] One-time post @ {run_at} channel={channel} platform={platform}")
     return {"status": "scheduled", "run_at": run_at.isoformat(), "job_id": job_id_tag}
 
 
