@@ -154,12 +154,23 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+# Build allowed origins list
+_origins = [
+    "http://localhost:3000",
+    "https://auto-post-kohl.vercel.app",
+    os.getenv("FRONTEND_URL", ""),
+    os.getenv("NGROK_URL", ""),
+]
+ALLOWED_ORIGINS = [o for o in _origins if o]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.ngrok-free\.app|https://.*\.ngrok-free\.dev",
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "ngrok-skip-browser-warning"],
+    max_age=600,
 )
 
 

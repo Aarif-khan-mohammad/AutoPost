@@ -1,4 +1,5 @@
 const B = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+const NGROK_HEADER = { "ngrok-skip-browser-warning": "1" };
 
 export type AuthUser = {
   user_id: string;
@@ -41,7 +42,7 @@ export function getCachedUser(): AuthUser | null {
 export async function apiSignup(email: string, password: string) {
   const res = await fetch(`${B}/api/auth/signup`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...NGROK_HEADER },
     body: JSON.stringify({ email, password }),
   });
   const data = await res.json();
@@ -52,7 +53,7 @@ export async function apiSignup(email: string, password: string) {
 export async function apiLogin(email: string, password: string) {
   const res = await fetch(`${B}/api/auth/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...NGROK_HEADER },
     body: JSON.stringify({ email, password }),
   });
   const data = await res.json();
@@ -62,7 +63,7 @@ export async function apiLogin(email: string, password: string) {
 
 export async function apiMe(token: string): Promise<AuthUser> {
   const res = await fetch(`${B}/api/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...NGROK_HEADER },
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.detail ?? "Auth failed");
@@ -71,5 +72,7 @@ export async function apiMe(token: string): Promise<AuthUser> {
 
 export function authHeaders(): Record<string, string> {
   const token = getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return token
+    ? { Authorization: `Bearer ${token}`, ...NGROK_HEADER }
+    : { ...NGROK_HEADER };
 }
