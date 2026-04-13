@@ -69,7 +69,7 @@ export async function apiMe(token: string): Promise<AuthUser> {
   return data;
 }
 
-export function authHeaders() {
+export function authHeaders(): Record<string, string> {
   const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
