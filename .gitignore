@@ -3,9 +3,13 @@
 .env.local
 client_secrets.json
 client_secret.json
-get_youtube_token.py
 backend/client_secrets.json
 backend/client_secret.json
+get_youtube_token.py
+
+# Chat logs
+*.md
+!README.md
 www.youtube.com_cookies.txt
 cookies_b64.txt
 
