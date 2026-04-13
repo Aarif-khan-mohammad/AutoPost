@@ -20,17 +20,15 @@ const STAGES = [
   { key: "complete",    label: "Done",        icon: "✅" },
 ];
 
-function StageBar({ step, status }: { step: string; status: Job["status"] }) {
+function StageBar({ step }: { step: string }) {
   const activeIdx = STAGES.findIndex(s => s.key === step);
-  const isFailed  = status === "failed";
 
   return (
     <div className="flex gap-1 mt-3">
       {STAGES.map((s, i) => {
         let bg = "bg-zinc-800";
-        if (isFailed && i === activeIdx)  bg = "bg-red-500";
-        else if (i < activeIdx)           bg = "bg-green-500";
-        else if (i === activeIdx)         bg = status === "done" ? "bg-green-500" : "bg-indigo-500";
+        if (i < activeIdx)           bg = "bg-green-500";
+        else if (i === activeIdx)         bg = "bg-indigo-500";
         return (
           <div key={s.key} className="flex-1 flex flex-col items-center gap-1">
             <div className={`h-1.5 w-full rounded-full transition-all duration-500 ${bg} ${i === activeIdx && status === "processing" ? "animate-pulse" : ""}`} />
@@ -70,7 +68,7 @@ function JobCard({ job }: { job: Job }) {
       </div>
 
       {/* Stage progress bar */}
-      <StageBar step={job.step} status={job.status} />
+      <StageBar step={job.step} />
 
       {/* Current step */}
       {activeStage && (
