@@ -3,61 +3,39 @@
 import { useEffect, useState } from "react";
 
 type Job = { id: string; next_run: string | null; one_time?: boolean };
-
-type ScheduleInfo = {
-  channel: string;
-  yt_times: string;
-  ig_times: string;
-  timezone: string;
-  jobs: Job[];
-};
-
-const TABS = [
-  { key: "youtube",   label: "YouTube Shorts", icon: "🎬" },
-  { key: "instagram", label: "Instagram Reels", icon: "📸" },
-  { key: "both",      label: "Both",            icon: "⚡" },
-];
+type ScheduleInfo = { channel: string; yt_times: string; ig_times: string; timezone: string; jobs: Job[] };
+type Suggestion   = { yt_times: string; ig_times: string; suggested_test: string };
 
 function fmt(iso: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" });
+  return new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function today() {
+  return new Date().toISOString().split("T")[0];
 }
 
 export default function SchedulePanel() {
-  const [info, setInfo]           = useState<ScheduleInfo | null>(null);
-  const [tab, setTab]             = useState("youtube");
-  const [channel, setChannel]     = useState("");
-  const [ytTimes, setYtTimes]     = useState("");
-  const [igTimes, setIgTimes]     = useState("");
-  const [tz, setTz]               = useState("Asia/Kolkata");
-  const [saving, setSaving]       = useState(false);
-  const [saved, setSaved]         = useState(false);
-  const [useGemini, setUseGemini] = useState(true);
-  const [suggesting, setSuggesting] = useState(false);
-  const [suggestion, setSuggestion] = useState<{yt_times:string; ig_times:string; suggested_test:string} | null>(null);
+  // Shared
+  const [channel, setChannel] = useState("");
+  const [tz, setTz]           = useState("Asia/Kolkata");
+  const [info, setInfo]       = useState<ScheduleInfo | null>(null);
 
-  // One-time post state
-  const [onceChannel, setOnceChannel] = useState("");
-  const [onceDate, setOnceDate]       = useState("");
-  const [onceTime, setOnceTime]       = useState("");
-  const [onceSaving, setOnceSaving]   = useState(false);
-  const [onceDone, setOnceDone]       = useState("");
+  // Recurring
+  const [tab, setTab]         = useState("youtube");
+  const [ytTimes, setYtTimes] = useState("08:00,20:00");
+  const [igTimes, setIgTimes] = useState("09:00,19:00");
+  const [saving, setSaving]   = useState(false);
+  const [saved, setSaved]     = useState(false);
 
-  const fetchSuggestion = async () => {
-    setSuggesting(true);
-    try {
-      const res  = await fetch(`/api/schedule/suggest?timezone=${encodeURIComponent(tz)}`);
-      const data = await res.json();
-      setSuggestion(data);
-      // Auto-fill recurring times
-      setYtTimes(data.yt_times);
-      setIgTimes(data.ig_times);
-      // Auto-fill one-time test time with Gemini's first recommended time
-      setOnceTime(data.suggested_test);
-    } finally {
-      setSuggesting(false);
-    }
-  };
+  // Gemini suggestion
+  const [suggesting, setSuggesting]   = useState(false);
+  const [suggestion, setSuggestion]   = useState<Suggestion | null>(null);
+
+  // One-time posts — support multiple
+  const [slots, setSlots] = useState([{ date: today(), time: "" }]);
+  const [scheduling, setScheduling] = useState(false);
+  const [scheduleMsg, setScheduleMsg] = useState("");
 
   const load = async () => {
     const res  = await fetch("/api/schedule");
@@ -71,38 +49,52 @@ export default function SchedulePanel() {
 
   useEffect(() => { load(); }, []);
 
+  // ── Gemini suggest ──────────────────────────────────────────────────────────
+  const fetchSuggestion = async () => {
+    setSuggesting(true);
+    try {
+      const res  = await fetch(`/api/schedule/suggest?timezone=${encodeURIComponent(tz)}`);
+      const data: Suggestion = await res.json();
+      setSuggestion(data);
+      setYtTimes(data.yt_times);
+      setIgTimes(data.ig_times);
+      // Pre-fill first empty time slot with Gemini's suggestion
+      setSlots(prev => prev.map((s, i) => i === 0 && !s.time ? { ...s, time: data.suggested_test } : s));
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  // ── Recurring save ──────────────────────────────────────────────────────────
   const saveRecurring = async () => {
     setSaving(true);
     await fetch("/api/schedule", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        channel_url: channel, platform: tab,
-        yt_times: useGemini ? "" : ytTimes,
-        ig_times: useGemini ? "" : igTimes,
-        timezone: tz,
-      }),
+      body: JSON.stringify({ channel_url: channel, platform: tab, yt_times: ytTimes, ig_times: igTimes, timezone: tz }),
     });
     setSaving(false); setSaved(true);
     setTimeout(() => setSaved(false), 3000);
     load();
   };
 
+  // ── One-time schedule ───────────────────────────────────────────────────────
   const scheduleOnce = async () => {
-    if (!onceDate || !onceTime || !onceChannel) return;
-    setOnceSaving(true); setOnceDone("");
-    const res = await fetch("/api/schedule/once", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        channel_url: onceChannel,
-        datetime:    `${onceDate}T${onceTime}`,
-        timezone:    tz,
-      }),
-    });
-    const data = await res.json();
-    setOnceSaving(false);
-    setOnceDone(res.ok ? `✅ Scheduled for ${fmt(data.run_at)}` : `❌ ${data.detail}`);
+    const valid = slots.filter(s => s.date && s.time);
+    if (!valid.length || !channel) return;
+    setScheduling(true); setScheduleMsg("");
+    const results: string[] = [];
+    for (const s of valid) {
+      const res  = await fetch("/api/schedule/once", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel_url: channel, datetime: `${s.date}T${s.time}`, timezone: tz }),
+      });
+      const data = await res.json();
+      results.push(res.ok ? `✅ ${fmt(data.run_at)}` : `❌ ${data.detail}`);
+    }
+    setScheduleMsg(results.join("  •  "));
+    setScheduling(false);
     load();
   };
 
@@ -111,69 +103,100 @@ export default function SchedulePanel() {
     load();
   };
 
+  const addSlot    = () => setSlots(p => [...p, { date: today(), time: "" }]);
+  const removeSlot = (i: number) => setSlots(p => p.filter((_, idx) => idx !== i));
+  const updateSlot = (i: number, key: "date" | "time", val: string) =>
+    setSlots(p => p.map((s, idx) => idx === i ? { ...s, [key]: val } : s));
+
   const recurringJobs = info?.jobs.filter(j => !j.one_time) || [];
   const onceJobs      = info?.jobs.filter(j => j.one_time)  || [];
 
-  // Default onceChannel to recurring channel
-  useEffect(() => { if (channel && !onceChannel) setOnceChannel(channel); }, [channel]);
-
-  // Default date to today
-  useEffect(() => {
-    const today = new Date().toISOString().split("T")[0];
-    setOnceDate(today);
-  }, []);
+  const TABS = [
+    { key: "youtube",   icon: "🎬", label: "YouTube" },
+    { key: "instagram", icon: "📸", label: "Instagram" },
+    { key: "both",      icon: "⚡", label: "Both" },
+  ];
 
   return (
     <div className="space-y-4">
 
+      {/* ── Shared channel + timezone ── */}
+      <div className="rounded-2xl border border-zinc-700 bg-zinc-900/60 p-5 space-y-3">
+        <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">⚙️ Channel Settings</h2>
+        <div>
+          <label className="text-xs text-zinc-500 mb-1 block">Source Channel URL</label>
+          <input type="url" placeholder="https://www.youtube.com/@ChannelName"
+            value={channel} onChange={e => setChannel(e.target.value)}
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-zinc-500 mb-1 block">Timezone</label>
+          <input type="text" placeholder="Asia/Kolkata"
+            value={tz} onChange={e => setTz(e.target.value)}
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+      </div>
+
       {/* ── One-time post card ── */}
       <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5 space-y-4">
         <div>
-          <h2 className="text-xs font-semibold text-amber-400 uppercase tracking-widest mb-0.5">📅 Schedule One-Time Post</h2>
-          <p className="text-xs text-zinc-600">Post once at a specific date & time — fires automatically</p>
+          <h2 className="text-xs font-semibold text-amber-400 uppercase tracking-widest mb-0.5">📅 Post at Specific Date & Time</h2>
+          <p className="text-xs text-zinc-500">Schedule one or more posts at exact dates & times — fires automatically, no interaction needed</p>
         </div>
 
+        {/* Slots */}
         <div className="space-y-2">
-          <div>
-            <label className="text-xs text-zinc-500 mb-1 block">Channel URL</label>
-            <input type="url" placeholder="https://www.youtube.com/@ChannelName"
-              value={onceChannel} onChange={e => setOnceChannel(e.target.value)}
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-amber-500"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-xs text-zinc-500 mb-1 block">Date</label>
-              <input type="date" value={onceDate} onChange={e => setOnceDate(e.target.value)}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
-              />
+          {slots.map((s, i) => (
+            <div key={i} className="flex gap-2 items-end">
+              <div className="flex-1">
+                {i === 0 && <label className="text-xs text-zinc-500 mb-1 block">Date</label>}
+                <input type="date" value={s.date} onChange={e => updateSlot(i, "date", e.target.value)}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+              <div className="flex-1">
+                {i === 0 && <label className="text-xs text-zinc-500 mb-1 block">Time ({tz})</label>}
+                <input type="time" value={s.time} onChange={e => updateSlot(i, "time", e.target.value)}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+              {slots.length > 1 && (
+                <button onClick={() => removeSlot(i)}
+                  className="mb-0.5 text-red-400 hover:text-red-300 text-lg leading-none px-1">×</button>
+              )}
             </div>
-            <div>
-              <label className="text-xs text-zinc-500 mb-1 block">Time ({tz})</label>
-              <input type="time" value={onceTime} onChange={e => setOnceTime(e.target.value)}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
-              />
-            </div>
-          </div>
+          ))}
 
-          <button onClick={scheduleOnce} disabled={onceSaving || !onceChannel || !onceDate || !onceTime}
-            className="w-full rounded-xl bg-amber-500 text-black px-4 py-2.5 text-sm font-bold hover:bg-amber-400 active:scale-95 disabled:opacity-40 transition-all">
-            {onceSaving ? "Scheduling…" : "⏰ Schedule This Post"}
+          <button onClick={addSlot}
+            className="text-xs text-amber-400 hover:text-amber-300 font-medium">
+            + Add another time slot
           </button>
-
-          {onceDone && <p className="text-xs text-center text-zinc-300">{onceDone}</p>}
         </div>
+
+        <button onClick={scheduleOnce}
+          disabled={scheduling || !channel || !slots.some(s => s.date && s.time)}
+          className="w-full rounded-xl bg-amber-500 text-black px-4 py-2.5 text-sm font-bold hover:bg-amber-400 active:scale-95 disabled:opacity-40 transition-all">
+          {scheduling ? "Scheduling…" : "⏰ Schedule Post(s)"}
+        </button>
+
+        {scheduleMsg && (
+          <p className="text-xs text-center text-zinc-300 break-all">{scheduleMsg}</p>
+        )}
 
         {/* Pending one-time jobs */}
         {onceJobs.length > 0 && (
           <div className="border-t border-zinc-800 pt-3 space-y-1.5">
-            <p className="text-xs text-amber-400 font-medium">Pending one-time posts</p>
+            <p className="text-xs text-amber-400 font-semibold">Pending scheduled posts</p>
             {onceJobs.map(j => (
-              <div key={j.id} className="flex items-center justify-between text-xs bg-zinc-900 rounded-lg px-3 py-2">
-                <span className="text-zinc-300 font-mono">{fmt(j.next_run)}</span>
+              <div key={j.id} className="flex items-center justify-between bg-zinc-900 rounded-lg px-3 py-2">
+                <div>
+                  <p className="text-xs text-zinc-200 font-mono">{fmt(j.next_run)}</p>
+                  <p className="text-xs text-zinc-600">{j.id}</p>
+                </div>
                 <button onClick={() => cancelJob(j.id)}
-                  className="text-red-400 hover:text-red-300 text-xs font-medium">
+                  className="text-xs text-red-400 hover:text-red-300 font-medium px-2 py-1 rounded hover:bg-red-500/10 transition-colors">
                   Cancel
                 </button>
               </div>
@@ -182,11 +205,11 @@ export default function SchedulePanel() {
         )}
       </div>
 
-      {/* ── Recurring schedule card ── */}
+      {/* ── Daily recurring card ── */}
       <div className="rounded-2xl border border-zinc-700 bg-zinc-900/60 p-5 space-y-4">
         <div>
-          <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-widest mb-0.5">🔁 Daily Recurring Schedule</h2>
-          <p className="text-xs text-zinc-600">Posts automatically every day at these times</p>
+          <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-widest mb-0.5">🔁 Daily Auto-Post Schedule</h2>
+          <p className="text-xs text-zinc-500">Runs every day automatically — Gemini picks the best times</p>
         </div>
 
         {/* Platform tabs */}
@@ -201,80 +224,54 @@ export default function SchedulePanel() {
           ))}
         </div>
 
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs text-zinc-500 mb-1 block">Source Channel URL</label>
-            <input type="url" placeholder="https://www.youtube.com/@ChannelName"
-              value={channel} onChange={e => setChannel(e.target.value)}
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
+        {/* Gemini suggest */}
+        <button onClick={fetchSuggestion} disabled={suggesting}
+          className="w-full rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-3 py-2.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-40 transition-all">
+          {suggesting ? "⏳ Asking Gemini…" : "🤖 Get AI-Recommended Times"}
+        </button>
+
+        {suggestion && (
+          <div className="rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2.5 space-y-1.5">
+            <p className="text-xs text-zinc-500 font-semibold">Gemini recommends for {tz}:</p>
+            <p className="text-xs text-zinc-300">🎬 YouTube: <span className="text-indigo-300 font-mono">{suggestion.yt_times}</span></p>
+            <p className="text-xs text-zinc-300">📸 Instagram: <span className="text-pink-300 font-mono">{suggestion.ig_times}</span></p>
+            <p className="text-xs text-amber-400 border-t border-zinc-800 pt-1.5 mt-1">
+              ⏰ Also pre-filled your one-time test slot with <span className="font-mono">{suggestion.suggested_test}</span>
+            </p>
           </div>
+        )}
 
-          <label className="flex items-center gap-2 cursor-pointer" onClick={() => setUseGemini(!useGemini)}>
-            <div className={`w-9 h-5 rounded-full transition-colors relative ${useGemini ? "bg-indigo-600" : "bg-zinc-700"}`}>
-              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${useGemini ? "translate-x-4" : "translate-x-0.5"}`} />
-            </div>
-            <span className="text-xs text-zinc-400">🤖 Let Gemini pick best posting times</span>
-          </label>
-
-          {useGemini && (
-            <div className="space-y-2">
-              <button onClick={fetchSuggestion} disabled={suggesting}
-                className="w-full rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-40 transition-all">
-                {suggesting ? "⏳ Asking Gemini…" : "🤖 Get AI-Recommended Times"}
-              </button>
-              {suggestion && (
-                <div className="rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 space-y-1">
-                  <p className="text-xs text-zinc-500 font-medium">Gemini suggests:</p>
-                  <p className="text-xs text-zinc-300">🎬 YouTube: <span className="text-indigo-300 font-mono">{suggestion.yt_times}</span></p>
-                  <p className="text-xs text-zinc-300">📸 Instagram: <span className="text-pink-300 font-mono">{suggestion.ig_times}</span></p>
-                  <p className="text-xs text-amber-400">⏰ Test time auto-filled: <span className="font-mono">{suggestion.suggested_test}</span></p>
-                </div>
-              )}
+        {/* Manual time override */}
+        <div className="space-y-2">
+          {(tab === "youtube" || tab === "both") && (
+            <div>
+              <label className="text-xs text-zinc-500 mb-1 block">🎬 YouTube times (24h, comma-separated)</label>
+              <input type="text" value={ytTimes} onChange={e => setYtTimes(e.target.value)}
+                placeholder="08:00,20:00"
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
             </div>
           )}
-
-          {!useGemini && (
-            <div className="space-y-2">
-              {(tab === "youtube" || tab === "both") && (
-                <div>
-                  <label className="text-xs text-zinc-500 mb-1 block">🎬 YouTube times (24h, comma-separated)</label>
-                  <input type="text" value={ytTimes} onChange={e => setYtTimes(e.target.value)}
-                    placeholder="08:00,20:00"
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              )}
-              {(tab === "instagram" || tab === "both") && (
-                <div>
-                  <label className="text-xs text-zinc-500 mb-1 block">📸 Instagram times (24h, comma-separated)</label>
-                  <input type="text" value={igTimes} onChange={e => setIgTimes(e.target.value)}
-                    placeholder="09:00,19:00"
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              )}
+          {(tab === "instagram" || tab === "both") && (
+            <div>
+              <label className="text-xs text-zinc-500 mb-1 block">📸 Instagram times (24h, comma-separated)</label>
+              <input type="text" value={igTimes} onChange={e => setIgTimes(e.target.value)}
+                placeholder="09:00,19:00"
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
             </div>
           )}
-
-          <div>
-            <label className="text-xs text-zinc-500 mb-1 block">Timezone</label>
-            <input type="text" value={tz} onChange={e => setTz(e.target.value)}
-              placeholder="Asia/Kolkata"
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-
-          <button onClick={saveRecurring} disabled={saving || !channel}
-            className="w-full rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold hover:bg-indigo-500 active:scale-95 disabled:opacity-40 transition-all">
-            {saving ? "Saving…" : saved ? "✓ Saved!" : "💾 Save Recurring Schedule"}
-          </button>
         </div>
+
+        <button onClick={saveRecurring} disabled={saving || !channel}
+          className="w-full rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold hover:bg-indigo-500 active:scale-95 disabled:opacity-40 transition-all">
+          {saving ? "Saving…" : saved ? "✓ Saved!" : "💾 Save Daily Schedule"}
+        </button>
 
         {/* Recurring next runs */}
         {recurringJobs.length > 0 && (
           <div className="border-t border-zinc-800 pt-3 space-y-1.5">
-            <p className="text-xs text-zinc-500 font-medium">Next recurring runs</p>
+            <p className="text-xs text-zinc-500 font-semibold">Next daily runs</p>
             {recurringJobs.map(j => (
               <div key={j.id} className="flex justify-between text-xs">
                 <span className="text-zinc-400">
@@ -287,7 +284,7 @@ export default function SchedulePanel() {
         )}
 
         {info?.jobs?.length === 0 && (
-          <p className="text-xs text-yellow-500/80">⚠ No schedule active — set a channel URL above</p>
+          <p className="text-xs text-yellow-500/80">⚠ No schedule active — save a schedule above</p>
         )}
       </div>
     </div>
