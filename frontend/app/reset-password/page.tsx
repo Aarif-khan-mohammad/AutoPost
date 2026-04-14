@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabase } from "@/lib/supabase";
 
 function ResetForm() {
   const [password, setPassword] = useState("");
@@ -12,59 +12,36 @@ function ResetForm() {
   const [ready, setReady]       = useState(false);
 
   useEffect(() => {
-    // Supabase puts the session tokens in the URL hash after redirect
-    // We need to exchange them for a session
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
-
     const hash = window.location.hash;
-    if (hash) {
-      // Parse access_token and refresh_token from hash
-      const params = new URLSearchParams(hash.substring(1));
-      const access_token  = params.get("access_token");
-      const refresh_token = params.get("refresh_token");
+    if (!hash) { setError("Invalid reset link. Please request a new one."); return; }
 
-      if (access_token && refresh_token) {
-        supabase.auth.setSession({ access_token, refresh_token }).then(({ error }) => {
-          if (error) setError("Invalid or expired reset link. Please request a new one.");
-          else setReady(true);
-        });
-      } else {
-        setError("Invalid reset link. Please request a new one.");
-      }
-    } else {
+    const params        = new URLSearchParams(hash.substring(1));
+    const access_token  = params.get("access_token");
+    const refresh_token = params.get("refresh_token");
+
+    if (!access_token || !refresh_token) {
       setError("Invalid reset link. Please request a new one.");
+      return;
     }
+
+    getSupabase().auth.setSession({ access_token, refresh_token }).then(({ error }) => {
+      if (error) setError("Expired or invalid link. Please request a new one.");
+      else setReady(true);
+    });
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (password !== confirm) { setError("Passwords don't match"); return; }
-    if (password.length < 6)  { setError("Password must be at least 6 characters"); return; }
+    if (password.length < 6)  { setError("Minimum 6 characters"); return; }
     setLoading(true);
     setError("");
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
-
-    // Also update in our custom users table via backend
-    const res = await fetch("/api/auth/reset-password", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ password }),
-    });
-
+    const { error } = await getSupabase().auth.updateUser({ password });
     setLoading(false);
-    if (!res.ok) {
-      const data = await res.json();
-      setError(data.detail ?? "Reset failed");
-    } else {
-      setDone(true);
-    }
+
+    if (error) setError(error.message);
+    else setDone(true);
   };
 
   return (
@@ -102,8 +79,8 @@ function ResetForm() {
             {error && (
               <div className="text-red-400 text-xs bg-red-500/10 rounded-lg px-3 py-2 space-y-1">
                 <p>{error}</p>
-                {error.includes("expired") && (
-                  <a href="/forgot-password" className="text-indigo-400 underline">Request a new reset link →</a>
+                {(error.includes("expired") || error.includes("Invalid")) && (
+                  <a href="/forgot-password" className="text-indigo-400 underline">Request a new link →</a>
                 )}
               </div>
             )}
