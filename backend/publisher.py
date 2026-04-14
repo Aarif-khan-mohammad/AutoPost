@@ -42,11 +42,12 @@ def publish_to_youtube(
     youtube = build("youtube", "v3", credentials=creds)
 
     tag_str = " ".join(f"#{t}" for t in hashtags)
+    # Use original video title as YouTube title for SEO, caption as description hook
     body = {
         "snippet": {
             "title":       caption[:100],
-            "description": f"{caption}\n\n{tag_str}",
-            "tags":        hashtags,
+            "description": f"{caption}\n\n{tag_str}\n\n#Shorts",
+            "tags":        hashtags + ["Shorts"],
             "categoryId":  "22",
         },
         "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False},

@@ -265,31 +265,48 @@ def _call_gemini(model_name: str, video_path: str, duration: int, platform: str 
     max_start = max(0, duration - CLIP_DURATION)
 
     platform_context = (
-        "YouTube Shorts algorithm rewards: strong hook in first 3s, high retention, trending audio, relatable moments."
+        "YouTube Shorts algorithm rewards: creator name-drops, curiosity gap titles, high retention, emotional reactions."
         if platform == "youtube" else
         "Instagram Reels algorithm rewards: visually striking opener, trending audio, emotional reaction, shareable moments."
     )
 
-    if is_short:
-        prompt = f"""This is a short-form video for {platform.upper()}.
-{platform_context}
-Generate a viral caption and hashtags optimized for {platform.upper()}.
+    # Extract creator/channel name from video path for context
+    channel_hint = os.path.basename(video_path).split("_")[0]
 
-Reply EXACTLY in this format:
+    if is_short:
+        prompt = f"""You are a viral YouTube Shorts growth expert. Analyze this short-form video carefully.
+{platform_context}
+
+Your job: write a title + caption that makes people STOP scrolling and click.
+Rules:
+- Mention the creator's name or recognizable people visible in the video
+- Use a curiosity gap or cliffhanger (e.g. "...and then this happened", "nobody expected this")
+- Include an emotion word (shocked, insane, crazy, hilarious, unbelievable)
+- Keep caption under 120 chars, no hashtags in caption
+- Hashtags: 3 niche creator/topic tags + 2 broad tags (e.g. #MrBeast #IShowSpeed not #viral #trending)
+
+Reply EXACTLY in this format (no extra text):
 START_TIME: 0
-CAPTION: <catchy caption under 150 chars, no hashtags>
+CAPTION: <title with creator name + curiosity gap + emotion>
 HASHTAGS: <tag1>, <tag2>, <tag3>, <tag4>, <tag5>"""
     else:
-        prompt = f"""You are a viral short-form content editor for {platform.upper()}.
+        prompt = f"""You are a viral YouTube Shorts growth expert. Analyze this video carefully.
 {platform_context}
-This video is {duration} seconds long.
-Find the single BEST {CLIP_DURATION}-second segment.
-Prioritize: strong hook in first 3s, high energy, emotion, or surprise.
-Avoid intros, outros, sponsor segments.
+This video is {duration} seconds long. Find the single BEST {CLIP_DURATION}-second segment.
 
-Reply EXACTLY in this format:
+Prioritize segments with: peak emotional reaction, surprising moment, creator doing something unexpected, funny/shocking outcome.
+Avoid: intros, outros, sponsor segments, slow talking parts.
+
+For the caption:
+- Mention the creator's name or recognizable people in that segment
+- Use a curiosity gap or cliffhanger
+- Include an emotion word (shocked, insane, crazy, hilarious, unbelievable)
+- Keep under 120 chars, no hashtags
+- Hashtags: 3 niche creator/topic tags + 2 broad tags (NOT #viral #trending #fyp — those are dead)
+
+Reply EXACTLY in this format (no extra text):
 START_TIME: <integer seconds, 0-{max_start}>
-CAPTION: <catchy caption under 150 chars, no hashtags>
+CAPTION: <title with creator name + curiosity gap + emotion>
 HASHTAGS: <tag1>, <tag2>, <tag3>, <tag4>, <tag5>"""
 
     response = model.generate_content([video_file, prompt])
