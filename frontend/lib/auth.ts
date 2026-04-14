@@ -1,4 +1,3 @@
-const B = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 const NGROK_HEADER = { "ngrok-skip-browser-warning": "1" };
 
 export type AuthUser = {
@@ -37,12 +36,12 @@ export function getCachedUser(): AuthUser | null {
   } catch { return null; }
 }
 
-// ── API calls ─────────────────────────────────────────────────────────────────
+// ── API calls (all via Next.js proxy — no CORS issues) ────────────────────────
 
 export async function apiSignup(email: string, password: string) {
-  const res = await fetch(`${B}/api/auth/signup`, {
+  const res = await fetch(`/api/auth/signup`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...NGROK_HEADER },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
   const data = await res.json();
@@ -51,9 +50,9 @@ export async function apiSignup(email: string, password: string) {
 }
 
 export async function apiLogin(email: string, password: string) {
-  const res = await fetch(`${B}/api/auth/login`, {
+  const res = await fetch(`/api/auth/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...NGROK_HEADER },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
   const data = await res.json();
@@ -62,8 +61,8 @@ export async function apiLogin(email: string, password: string) {
 }
 
 export async function apiMe(token: string): Promise<AuthUser> {
-  const res = await fetch(`${B}/api/auth/me`, {
-    headers: { Authorization: `Bearer ${token}`, ...NGROK_HEADER },
+  const res = await fetch(`/api/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` },
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.detail ?? "Auth failed");
@@ -94,7 +93,5 @@ export async function apiResetPassword(email: string, token: string, password: s
 
 export function authHeaders(): Record<string, string> {
   const token = getToken();
-  return token
-    ? { Authorization: `Bearer ${token}`, ...NGROK_HEADER }
-    : { ...NGROK_HEADER };
+  return token ? { Authorization: `Bearer ${token}`, ...NGROK_HEADER } : { ...NGROK_HEADER };
 }
