@@ -171,7 +171,7 @@ export default function JobForm({ mode, canPost = true }: { mode: "admin" | "use
     loadPending();
   };
 
-  const cancelJob = async (jobId: string) => {
+  const cancelScheduledJob = async (jobId: string) => {
     await fetch(`/api/schedule/once/${jobId}`, { method: "DELETE", headers: authHeaders() });
     loadPending();
   };
@@ -361,7 +361,7 @@ export default function JobForm({ mode, canPost = true }: { mode: "admin" | "use
                       <p className="text-xs text-zinc-300 font-mono">
                         {j.next_run ? new Date(j.next_run).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—"}
                       </p>
-                      <button onClick={() => cancelJob(j.id)}
+                      <button onClick={() => cancelScheduledJob(j.id)}
                         className="text-xs text-red-400 hover:text-red-300 font-medium px-2 py-1 rounded hover:bg-red-500/10 transition-colors">
                         Cancel
                       </button>
