@@ -80,6 +80,14 @@ export default function AuthPage() {
               <p className="text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">{error}</p>
             )}
 
+            {mode === "login" && (
+              <div className="text-right">
+                <a href="/forgot-password" className="text-xs text-indigo-400 hover:underline">
+                  Forgot password?
+                </a>
+              </div>
+            )}
+
             <button type="submit" disabled={loading}
               className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold hover:bg-indigo-500 active:scale-95 disabled:opacity-40 transition-all">
               {loading ? "Please wait…" : mode === "login" ? "🔑 Login" : "✨ Create Account"}

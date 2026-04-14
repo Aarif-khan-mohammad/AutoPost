@@ -202,6 +202,16 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    email:    str
+    token:    str
+    password: str
+
+
 # ── Auth routes ───────────────────────────────────────────────────────────────
 
 @app.post("/api/auth/signup")
@@ -237,6 +247,73 @@ async def me(user: dict = Depends(get_current_user)):
         "post_count": post_count,
         "can_post":   data["role"] == "admin" or post_count < 1,
     }
+
+
+# In-memory reset tokens {email: token} — good enough for single-server
+_reset_tokens: dict[str, str] = {}
+
+
+@app.post("/api/auth/forgot-password")
+async def forgot_password(req: ForgotPasswordRequest):
+    user = await get_user_by_email(req.email)
+    if not user:
+        # Don't reveal whether email exists
+        return {"message": "If that email exists, a reset code has been sent."}
+
+    import secrets, smtplib
+    from email.mime.text import MIMEText
+
+    token = secrets.token_urlsafe(32)
+    _reset_tokens[req.email] = token
+
+    smtp_host = os.getenv("SMTP_HOST", "")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user = os.getenv("SMTP_USER", "")
+    smtp_pass = os.getenv("SMTP_PASS", "")
+    frontend  = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+    if smtp_host and smtp_user:
+        try:
+            msg = MIMEText(
+                f"Your AutoPost password reset code:\n\n{token}\n\n"
+                f"Or use this link: {frontend}/reset-password?email={req.email}&token={token}\n\n"
+                f"This code expires when the server restarts."
+            )
+            msg["Subject"] = "AutoPost — Reset Your Password"
+            msg["From"]    = smtp_user
+            msg["To"]      = req.email
+            with smtplib.SMTP(smtp_host, smtp_port) as s:
+                s.starttls()
+                s.login(smtp_user, smtp_pass)
+                s.send_message(msg)
+            log.info(f"[auth] Reset email sent to {req.email}")
+        except Exception as e:
+            log.error(f"[auth] Failed to send reset email: {e}")
+    else:
+        # No SMTP configured — log token for dev use
+        log.info(f"[auth] RESET TOKEN for {req.email}: {token}")
+
+    return {"message": "If that email exists, a reset code has been sent."}
+
+
+@app.post("/api/auth/reset-password")
+async def reset_password(req: ResetPasswordRequest):
+    stored = _reset_tokens.get(req.email)
+    if not stored or stored != req.token:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset code")
+
+    user = await get_user_by_email(req.email)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Update password in DB
+    _get_client().table("users").update(
+        {"hashed_password": hash_password(req.password)}
+    ).eq("email", req.email).execute()
+
+    del _reset_tokens[req.email]
+    log.info(f"[auth] Password reset for {req.email}")
+    return {"message": "Password updated successfully"}
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────

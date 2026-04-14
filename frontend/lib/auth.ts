@@ -70,6 +70,28 @@ export async function apiMe(token: string): Promise<AuthUser> {
   return data;
 }
 
+export async function apiForgotPassword(email: string) {
+  const res = await fetch(`${B}/api/auth/forgot-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...NGROK_HEADER },
+    body: JSON.stringify({ email }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail ?? "Request failed");
+  return data;
+}
+
+export async function apiResetPassword(email: string, token: string, password: string) {
+  const res = await fetch(`${B}/api/auth/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...NGROK_HEADER },
+    body: JSON.stringify({ email, token, password }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail ?? "Reset failed");
+  return data;
+}
+
 export function authHeaders(): Record<string, string> {
   const token = getToken();
   return token
