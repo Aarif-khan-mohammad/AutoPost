@@ -67,6 +67,7 @@ export default function JobForm({ mode, canPost = true }: { mode: "admin" | "use
   });
   const [job, setJob]         = useState<JobStatus | null>(null);
   const [loading, setLoading] = useState(false);
+  const [pollRef, setPollRef] = useState<ReturnType<typeof setInterval> | null>(null);
 
   // Scheduled post state
   const [showSchedule, setShowSchedule] = useState(false);
@@ -91,9 +92,26 @@ export default function JobForm({ mode, canPost = true }: { mode: "admin" | "use
       const data: JobStatus = await res.json();
       setJob(data);
       if (data.status === "done" || data.status === "failed") {
-        clearInterval(iv); setLoading(false);
+        clearInterval(iv); setLoading(false); setPollRef(null);
       }
     }, 3000);
+    setPollRef(iv);
+  };
+
+  const cancelJob = async () => {
+    if (!job || job.job_id === "pending" || job.job_id === "error") {
+      if (pollRef) clearInterval(pollRef);
+      setLoading(false); setJob(null); setPollRef(null);
+      return;
+    }
+    try {
+      await fetch(`/api/jobs/${job.job_id}/cancel`, {
+        method: "POST", headers: authHeaders(),
+      });
+    } catch { /* best effort */ }
+    if (pollRef) clearInterval(pollRef);
+    setJob(prev => prev ? { ...prev, status: "failed", step: "Cancelled by user" } : null);
+    setLoading(false); setPollRef(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -359,7 +377,15 @@ export default function JobForm({ mode, canPost = true }: { mode: "admin" | "use
       {/* ── Pipeline cards ── */}
       {job && (
         <div className="space-y-2">
-          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest px-1">Pipeline</h2>
+          <div className="flex items-center justify-between px-1">
+            <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Pipeline</h2>
+            {loading && (
+              <button onClick={cancelJob}
+                className="text-xs text-red-400 hover:text-red-300 font-medium px-3 py-1 rounded-lg border border-red-500/30 hover:bg-red-500/10 transition-all">
+                ✕ Stop
+              </button>
+            )}
+          </div>
           {STAGES.map((stage, idx) => {
             let state: "done" | "active" | "pending" | "failed" = "pending";
             if (isFailed && idx === activeIdx)  state = "failed";
