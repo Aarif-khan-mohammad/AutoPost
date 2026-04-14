@@ -42,7 +42,18 @@ function StageBar({ step }: { step: string }) {
   );
 }
 
-function JobCard({ job }: { job: Job }) {
+function JobCard({ job, onCancel }: { job: Job; onCancel: (id: string) => void }) {
+  const [cancelling, setCancelling] = useState(false);
+
+  const handleCancel = async () => {
+    setCancelling(true);
+    try {
+      await fetch(`/api/jobs/${job.id}/cancel`, { method: "POST", headers: authHeaders() });
+      onCancel(job.id);
+    } catch { /* best effort */ } finally {
+      setCancelling(false);
+    }
+  };
   const timeAgo = (() => {
     const diff = Math.floor((Date.now() - new Date(job.created_at).getTime()) / 1000);
     if (diff < 60)   return `${diff}s ago`;
@@ -62,9 +73,15 @@ function JobCard({ job }: { job: Job }) {
           </span>
           <span className="text-xs text-zinc-500">{timeAgo}</span>
         </div>
-        <p className="text-xs text-zinc-500 truncate max-w-[180px]">
-          {job.channel_url.replace("https://www.youtube.com/", "").replace("https://youtube.com/", "")}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-zinc-500 truncate max-w-[140px]">
+            {job.channel_url.replace("https://www.youtube.com/", "").replace("https://youtube.com/", "")}
+          </p>
+          <button onClick={handleCancel} disabled={cancelling}
+            className="text-xs text-red-400 hover:text-red-300 font-medium px-2 py-1 rounded-lg border border-red-500/30 hover:bg-red-500/10 disabled:opacity-40 transition-all whitespace-nowrap">
+            {cancelling ? "…" : "✕ Stop"}
+          </button>
+        </div>
       </div>
 
       {/* Stage progress bar */}
@@ -117,6 +134,10 @@ export default function LiveFeed() {
 
   const activeCount = jobs.filter(j => j.status === "processing" || j.status === "queued").length;
 
+  const handleCancelled = (id: string) => {
+    setJobs(prev => prev.filter(j => j.id !== id));
+  };
+
   if (loading) return null;
   if (jobs.length === 0) return null;
 
@@ -132,7 +153,7 @@ export default function LiveFeed() {
           </span>
         )}
       </div>
-      {jobs.map(job => <JobCard key={job.id} job={job} />)}
+      {jobs.map(job => <JobCard key={job.id} job={job} onCancel={handleCancelled} />)}
     </div>
   );
 }
