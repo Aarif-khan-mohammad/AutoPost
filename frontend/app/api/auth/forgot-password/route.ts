@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
-const BACKEND_URL = (process.env.BACKEND_URL as string).replace(/\/$/, "");
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const res  = await fetch(`${BACKEND_URL}/api/auth/forgot-password`, {
-    method:  "POST",
-    headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify(body),
+  const { email } = await req.json();
+  if (!email) return NextResponse.json({ detail: "Email required" }, { status: 400 });
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? "https://auto-post-kohl.vercel.app"}/reset-password`,
   });
-  const data = await res.json();
-  return NextResponse.json(data, { status: res.status });
+
+  if (error) return NextResponse.json({ detail: error.message }, { status: 400 });
+  return NextResponse.json({ message: "Reset link sent" });
 }

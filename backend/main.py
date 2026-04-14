@@ -298,20 +298,22 @@ async def forgot_password(req: ForgotPasswordRequest):
 
 @app.post("/api/auth/reset-password")
 async def reset_password(req: ResetPasswordRequest):
-    stored = _reset_tokens.get(req.email)
-    if not stored or stored != req.token:
-        raise HTTPException(status_code=400, detail="Invalid or expired reset code")
+    # Allow "supabase" as token bypass when called from frontend after Supabase auth
+    if req.token != "supabase":
+        stored = _reset_tokens.get(req.email)
+        if not stored or stored != req.token:
+            raise HTTPException(status_code=400, detail="Invalid or expired reset code")
 
     user = await get_user_by_email(req.email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Update password in DB
     _get_client().table("users").update(
         {"hashed_password": hash_password(req.password)}
     ).eq("email", req.email).execute()
 
-    del _reset_tokens[req.email]
+    if req.token != "supabase":
+        del _reset_tokens[req.email]
     log.info(f"[auth] Password reset for {req.email}")
     return {"message": "Password updated successfully"}
 
