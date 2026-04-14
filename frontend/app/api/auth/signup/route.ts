@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
   const B = (process.env.BACKEND_URL ?? "").replace(/\/$/, "");
-  if (!B) return NextResponse.json({ detail: "BACKEND_URL not set in Vercel environment variables" }, { status: 503 });
+  if (!B) return NextResponse.json({ detail: "BACKEND_URL not configured" }, { status: 503 });
   try {
     const body = await req.json();
     const res  = await fetch(`${B}/api/auth/signup`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "1" },
       body: JSON.stringify(body),
     });
     const data = await res.json();
