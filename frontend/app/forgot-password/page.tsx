@@ -3,11 +3,6 @@
 import { useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
 export default function ForgotPassword() {
   const [email, setEmail]   = useState("");
   const [sent, setSent]     = useState(false);
@@ -18,6 +13,10 @@ export default function ForgotPassword() {
     e.preventDefault();
     setLoading(true);
     setError("");
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     });

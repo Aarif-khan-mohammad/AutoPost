@@ -3,11 +3,6 @@
 import { useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
 export default function ResetPassword() {
   const [password, setPassword]   = useState("");
   const [confirm, setConfirm]     = useState("");
@@ -21,6 +16,10 @@ export default function ResetPassword() {
     if (password.length < 6)  { setError("Password must be at least 6 characters"); return; }
     setLoading(true);
     setError("");
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
     const { error } = await supabase.auth.updateUser({ password });
     setLoading(false);
     if (error) setError(error.message);
