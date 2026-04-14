@@ -469,6 +469,20 @@ async def get_schedule():
 
 # ── Pipeline ──────────────────────────────────────────────────────────────────
 
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str, user: dict = Depends(get_current_user)):
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if user["role"] != "admin" and job.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if job["status"] in ("done", "failed"):
+        return {"status": job["status"], "message": "Job already completed"}
+    await update_job(job_id, status="failed", step="Cancelled by user")
+    log.info(f"[api] Job {job_id} cancelled")
+    return {"status": "cancelled"}
+
 async def run_pipeline(job_id: str, channel_url: str, req: ProcessRequest | None = None, platform: str = "youtube", user_id: str = "system"):
     log.info(f"[pipeline] 🚀 Job {job_id} user={user_id} platform={platform} channel={channel_url}")
     try:
