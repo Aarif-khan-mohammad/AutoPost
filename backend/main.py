@@ -326,24 +326,37 @@ async def health():
 
 
 @app.post("/api/process")
-async def process_video(req: ProcessRequest):
+async def process_video(req: ProcessRequest, user: dict = Depends(get_current_user)):
+    # Enforce 1-post limit for regular users
+    if user["role"] != "admin":
+        count = await get_user_post_count(user["user_id"])
+        if count >= 1:
+            raise HTTPException(
+                status_code=403,
+                detail="Free tier limit reached. You have already made 1 successful post."
+            )
     job_id = str(uuid.uuid4())
-    log.info(f"[api] ▶ Manual post platform={req.platform} channel={req.channel_url}")
-    await create_job(job_id, req.channel_url)
-    asyncio.create_task(run_pipeline(job_id, req.channel_url, req, platform=req.platform))
+    log.info(f"[api] ▶ Manual post user={user['user_id']} role={user['role']} platform={req.platform}")
+    await create_job(job_id, req.channel_url, user_id=user["user_id"])
+    asyncio.create_task(run_pipeline(job_id, req.channel_url, req, platform=req.platform, user_id=user["user_id"]))
     return {"job_id": job_id, "status": "queued"}
 
 
 @app.get("/api/jobs")
-async def list_recent_jobs():
-    return await list_jobs(limit=10)
+async def list_recent_jobs(user: dict = Depends(get_current_user)):
+    # Admin sees all jobs; users see only their own
+    uid = None if user["role"] == "admin" else user["user_id"]
+    return await list_jobs(user_id=uid, limit=10)
 
 
 @app.get("/api/jobs/{job_id}")
-async def get_job_status(job_id: str):
+async def get_job_status(job_id: str, user: dict = Depends(get_current_user)):
     job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    # Users can only see their own jobs
+    if user["role"] != "admin" and job.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
     return job
 
 
@@ -456,8 +469,8 @@ async def get_schedule():
 
 # ── Pipeline ──────────────────────────────────────────────────────────────────
 
-async def run_pipeline(job_id: str, channel_url: str, req: ProcessRequest | None = None, platform: str = "youtube"):
-    log.info(f"[pipeline] 🚀 Job {job_id} platform={platform} channel={channel_url}")
+async def run_pipeline(job_id: str, channel_url: str, req: ProcessRequest | None = None, platform: str = "youtube", user_id: str = "system"):
+    log.info(f"[pipeline] 🚀 Job {job_id} user={user_id} platform={platform} channel={channel_url}")
     try:
         loop = asyncio.get_event_loop()
 
@@ -465,14 +478,14 @@ async def run_pipeline(job_id: str, channel_url: str, req: ProcessRequest | None
             asyncio.run_coroutine_threadsafe(update_job(job_id, status="processing", step=name), loop)
 
         await update_job(job_id, status="processing", step="downloading")
-        already_used = await get_processed_video_ids(channel_url)
+        already_used = await get_processed_video_ids(channel_url, user_id=user_id)
 
         output_path, caption, hashtags, video_info = await asyncio.to_thread(
             process_channel, channel_url, job_id, already_used, sync_step, platform
         )
 
         log.info(f"[pipeline] ✂ Clip ready: '{video_info['title']}' ({video_info['duration']}s)")
-        await mark_video_processed(channel_url, video_info["video_id"], video_info["title"])
+        await mark_video_processed(channel_url, video_info["video_id"], video_info["title"], user_id=user_id)
         await update_job(job_id, status="processing", step="publishing")
 
         results = {
