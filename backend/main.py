@@ -23,7 +23,7 @@ from auth import (
     get_current_user, require_admin,
 )
 from slicer import process_channel
-from publisher import publish_to_youtube, publish_to_instagram
+from publisher import publish_to_youtube, publish_to_instagram, get_my_shorts_stats, delete_youtube_video
 
 load_dotenv()
 logging.basicConfig(
@@ -265,6 +265,9 @@ async def me(user: dict = Depends(get_current_user)):
 # In-memory reset tokens {email: token} — good enough for single-server
 _reset_tokens: dict[str, str] = {}
 
+# Optimization hints from analytics — applied to next post
+_optimization_hints: list[str] = []
+
 
 @app.post("/api/auth/forgot-password")
 async def forgot_password(req: ForgotPasswordRequest):
@@ -479,6 +482,87 @@ async def get_schedule():
         "jobs":     jobs,
     }
 
+
+
+@app.get("/api/analytics/shorts")
+async def get_shorts_analytics(user: dict = Depends(get_current_user)):
+    """Fetch latest 5 Shorts, check views, delete low performers, get Gemini insights."""
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    try:
+        shorts = await asyncio.to_thread(get_my_shorts_stats, 5)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch stats: {e}")
+
+    VIEW_THRESHOLD = int(os.getenv("SHORTS_VIEW_THRESHOLD", "1000"))
+    deleted = []
+    kept    = []
+
+    for short in shorts:
+        if short["views"] < VIEW_THRESHOLD:
+            try:
+                await asyncio.to_thread(delete_youtube_video, short["video_id"])
+                short["action"] = "deleted"
+                deleted.append(short)
+                log.info(f"[analytics] Deleted low-performer: {short['title']} ({short['views']} views)")
+            except Exception as e:
+                short["action"] = f"delete_failed: {e}"
+                kept.append(short)
+        else:
+            short["action"] = "kept"
+            kept.append(short)
+
+    # Ask Gemini to analyze why low performers failed and suggest improvements
+    analysis = ""
+    if deleted or shorts:
+        try:
+            model = genai.GenerativeModel("gemini-2.0-flash")
+            shorts_summary = "
+".join([
+                f"- '{s['title']}': {s['views']} views, {s['likes']} likes, {s['comments']} comments, tags: {s['tags'][:3]}, action: {s['action']}"
+                for s in shorts
+            ])
+            prompt = f"""You are a YouTube Shorts growth expert. Analyze these recent Shorts performance:
+
+{shorts_summary}
+
+View threshold for keeping: {VIEW_THRESHOLD} views
+
+Analyze:
+1. Why are the deleted/low-performing Shorts not getting views?
+2. What specific improvements should be made for the NEXT Short?
+3. What title format, tags, posting time, or content style would perform better?
+
+Be specific and actionable. Reply in 3-5 bullet points."""
+
+            analysis = model.generate_content(prompt).text.strip()
+            log.info(f"[analytics] Gemini analysis complete")
+
+            # Store hints for next post
+            global _optimization_hints
+            _optimization_hints = [line.strip() for line in analysis.split("
+") if line.strip().startswith("-")]
+            log.info(f"[analytics] Stored {len(_optimization_hints)} optimization hints")
+        except Exception as e:
+            analysis = f"Gemini analysis failed: {e}"
+
+    return {
+        "shorts":    shorts,
+        "kept":      len(kept),
+        "deleted":   len(deleted),
+        "threshold": VIEW_THRESHOLD,
+        "analysis":  analysis,
+        "hints_stored": len(_optimization_hints),
+    }
+
+
+@app.get("/api/analytics/hints")
+async def get_optimization_hints(user: dict = Depends(get_current_user)):
+    """Get current optimization hints from last analytics run."""
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    return {"hints": _optimization_hints}
 
 # ── Pipeline ──────────────────────────────────────────────────────────────────
 

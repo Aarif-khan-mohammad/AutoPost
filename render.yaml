@@ -32,3 +32,5 @@ services:
         sync: false
       - key: YTDLP_PROXY
         sync: false
+      - key: SHORTS_VIEW_THRESHOLD
+        value: "1000"

@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
 import JobForm from "@/components/JobForm";
 import SchedulePanel from "@/components/SchedulePanel";
+import AnalyticsPanel from "@/components/AnalyticsPanel";
+import AnalyticsPanel from "@/components/AnalyticsPanel";
 import LiveFeed from "@/components/LiveFeed";
 
 export default function Home() {
@@ -106,7 +108,7 @@ export default function Home() {
         </div>
 
         {tab === "schedule" && isAdmin
-          ? <SchedulePanel />
+          ? <><AnalyticsPanel /><SchedulePanel /></>
           : <JobForm mode={isAdmin ? "admin" : "user"} canPost={canPost} />
         }
       </div>

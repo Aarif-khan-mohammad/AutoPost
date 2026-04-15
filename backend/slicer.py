@@ -297,6 +297,13 @@ def _call_gemini(model_name: str, video_path: str, duration: int, platform: str 
     # Extract creator/channel name from video path for context
     channel_hint = os.path.basename(video_path).split("_")[0]
 
+    # Load optimization hints from last analytics run
+    try:
+        from main import _optimization_hints
+        hints_text = ("\n\nPrevious performance insights to apply:\n" + "\n".join(_optimization_hints)) if _optimization_hints else ""
+    except Exception:
+        hints_text = ""
+
     if is_short:
         prompt = f"""You are a viral YouTube Shorts growth expert. Analyze this short-form video carefully.
 {platform_context}
@@ -316,7 +323,7 @@ HASHTAGS: <tag1>, <tag2>, <tag3>, <tag4>, <tag5>"""
     else:
         prompt = f"""You are a viral YouTube Shorts growth expert. Analyze this video carefully.
 {platform_context}
-This video is {duration} seconds long. Find the single BEST {CLIP_DURATION}-second segment.
+This video is {duration} seconds long. Find the single BEST {CLIP_DURATION}-second segment.{hints_text}
 
 Prioritize segments with: peak emotional reaction, surprising moment, creator doing something unexpected, funny/shocking outcome.
 Avoid: intros, outros, sponsor segments, slow talking parts.
