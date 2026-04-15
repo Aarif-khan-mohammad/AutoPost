@@ -489,7 +489,6 @@ async def get_shorts_analytics(user: dict = Depends(get_current_user)):
     """Fetch latest 5 Shorts, check views, delete low performers, get Gemini insights."""
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
-
     try:
         shorts = await asyncio.to_thread(get_my_shorts_stats, 5)
     except Exception as e:
@@ -505,66 +504,61 @@ async def get_shorts_analytics(user: dict = Depends(get_current_user)):
                 await asyncio.to_thread(delete_youtube_video, short["video_id"])
                 short["action"] = "deleted"
                 deleted.append(short)
-                log.info(f"[analytics] Deleted low-performer: {short['title']} ({short['views']} views)")
+                log.info(f"[analytics] Deleted: {short['title']} ({short['views']} views)")
             except Exception as e:
-                short["action"] = f"delete_failed: {e}"
+                short["action"] = f"delete_failed"
                 kept.append(short)
         else:
             short["action"] = "kept"
             kept.append(short)
 
-    # Ask Gemini to analyze why low performers failed and suggest improvements
     analysis = ""
-    if deleted or shorts:
+    if shorts:
         try:
             model = genai.GenerativeModel("gemini-2.0-flash")
-            shorts_summary = "
-".join([
-                f"- '{s['title']}': {s['views']} views, {s['likes']} likes, {s['comments']} comments, tags: {s['tags'][:3]}, action: {s['action']}"
-                for s in shorts
-            ])
-            prompt = f"""You are a YouTube Shorts growth expert. Analyze these recent Shorts performance:
-
-{shorts_summary}
-
-View threshold for keeping: {VIEW_THRESHOLD} views
-
-Analyze:
-1. Why are the deleted/low-performing Shorts not getting views?
-2. What specific improvements should be made for the NEXT Short?
-3. What title format, tags, posting time, or content style would perform better?
-
-Be specific and actionable. Reply in 3-5 bullet points."""
-
+            lines = []
+            for s in shorts:
+                lines.append(
+                    f"- '{s['title']}': {s['views']} views, "
+                    f"{s['likes']} likes, action: {s['action']}"
+                )
+            shorts_summary = "\n".join(lines)
+            prompt = (
+                f"You are a YouTube Shorts growth expert. Analyze these recent Shorts:\n\n"
+                f"{shorts_summary}\n\n"
+                f"View threshold: {VIEW_THRESHOLD}\n\n"
+                f"1. Why are low-performing Shorts not getting views?\n"
+                f"2. What specific improvements for the NEXT Short?\n"
+                f"3. Better title format, tags, or content style?\n\n"
+                f"Reply in 3-5 bullet points starting with -"
+            )
             analysis = model.generate_content(prompt).text.strip()
-            log.info(f"[analytics] Gemini analysis complete")
-
-            # Store hints for next post
             global _optimization_hints
-            _optimization_hints = [line.strip() for line in analysis.split("
-") if line.strip().startswith("-")]
+            _optimization_hints = [
+                line.strip() for line in analysis.splitlines()
+                if line.strip().startswith("-")
+            ]
             log.info(f"[analytics] Stored {len(_optimization_hints)} optimization hints")
         except Exception as e:
             analysis = f"Gemini analysis failed: {e}"
 
     return {
-        "shorts":    shorts,
-        "kept":      len(kept),
-        "deleted":   len(deleted),
-        "threshold": VIEW_THRESHOLD,
-        "analysis":  analysis,
+        "shorts":       shorts,
+        "kept":         len(kept),
+        "deleted":      len(deleted),
+        "threshold":    VIEW_THRESHOLD,
+        "analysis":     analysis,
         "hints_stored": len(_optimization_hints),
     }
 
 
 @app.get("/api/analytics/hints")
 async def get_optimization_hints(user: dict = Depends(get_current_user)):
-    """Get current optimization hints from last analytics run."""
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     return {"hints": _optimization_hints}
 
-# ── Pipeline ──────────────────────────────────────────────────────────────────
+
 
 
 @app.post("/api/jobs/{job_id}/cancel")
