@@ -279,9 +279,19 @@ def _call_gemini(model_name: str, video_path: str, duration: int, platform: str 
     max_start = max(0, duration - CLIP_DURATION)
 
     platform_context = (
-        "YouTube Shorts algorithm rewards: creator name-drops, curiosity gap titles, high retention, emotional reactions."
+        """YouTube Shorts algorithm (2024-2025):
+- Hook MUST grab attention in first 0.5 seconds
+- Title with #Shorts gets pushed to Shorts feed and suggested videos
+- High retention (watch full video) = more distribution to new audiences
+- Trending topics + strong emotions = viral potential
+- Caption should create curiosity gap or strong emotion"""
         if platform == "youtube" else
-        "Instagram Reels algorithm rewards: visually striking opener, trending audio, emotional reaction, shareable moments."
+        """Instagram Reels algorithm (2024-2025):
+- First frame must be visually striking - no black frames
+- Emotional reactions (shock, laugh, awe) get shared more
+- 3-5 hashtags perform better than 30 hashtags
+- Caption with question or CTA boosts comments and reach
+- Reels shown to non-followers if engagement rate is high"""
     )
 
     # Extract creator/channel name from video path for context

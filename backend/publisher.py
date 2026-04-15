@@ -42,15 +42,34 @@ def publish_to_youtube(
     youtube = build("youtube", "v3", credentials=creds)
 
     tag_str = " ".join(f"#{t}" for t in hashtags)
-    # Use original video title as YouTube title for SEO, caption as description hook
+    # Title must contain #Shorts for YouTube Shorts feed distribution
+    # Keep title punchy and under 60 chars for mobile display
+    title = caption[:97] + " #Shorts" if len(caption) <= 92 else caption[:92] + "... #Shorts"
+
+    # Description optimized for discovery:
+    # - Hook line first (caption)
+    # - Hashtags for search
+    # - #Shorts mandatory for feed
+    # - Call to action
+    description = (
+        f"{caption}\n\n"
+        f"{tag_str} #Shorts #viral #trending #fyp\n\n"
+        f"Like & Subscribe for more! 🔔"
+    )
+
     body = {
         "snippet": {
-            "title":       caption[:100],
-            "description": f"{caption}\n\n{tag_str}\n\n#Shorts",
-            "tags":        hashtags + ["Shorts"],
-            "categoryId":  "22",
+            "title":          title,
+            "description":    description,
+            "tags":           hashtags + ["Shorts", "viral", "trending", "fyp", "youtube shorts"],
+            "categoryId":     "24",  # Entertainment — best for Shorts discovery
+            "defaultLanguage": "en",
         },
-        "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False},
+        "status": {
+            "privacyStatus":           "public",
+            "selfDeclaredMadeForKids": False,
+            "madeForKids":             False,
+        },
     }
 
     media   = MediaFileUpload(video_path, mimetype="video/mp4", resumable=True)

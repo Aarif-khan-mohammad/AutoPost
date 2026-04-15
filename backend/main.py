@@ -75,8 +75,8 @@ def _setup_scheduler(override: dict = None):
     tz_name = cfg.get("timezone") or os.getenv("SCHEDULE_TIMEZONE", "Asia/Kolkata")
     channel = (cfg.get("channel") or os.getenv("SCHEDULE_CHANNEL_URL", "")).strip()
 
-    yt_times = (cfg.get("yt_times") or os.getenv("SCHEDULE_YT_TIMES", "08:00,20:00")).split(",")
-    ig_times = (cfg.get("ig_times") or os.getenv("SCHEDULE_IG_TIMES", "09:00,19:00")).split(",")
+    yt_times = (cfg.get("yt_times") or os.getenv("SCHEDULE_YT_TIMES", "07:00,13:00,20:00")).split(",")
+    ig_times = (cfg.get("ig_times") or os.getenv("SCHEDULE_IG_TIMES", "08:00,12:00,19:00")).split(",")
 
     if not channel:
         log.warning("[scheduler] SCHEDULE_CHANNEL_URL not set — auto-posting disabled.")
@@ -460,8 +460,8 @@ async def get_schedule():
     ]
     return {
         "channel":  _schedule_override.get("channel")  or os.getenv("SCHEDULE_CHANNEL_URL", ""),
-        "yt_times": _schedule_override.get("yt_times") or os.getenv("SCHEDULE_YT_TIMES", "08:00,20:00"),
-        "ig_times": _schedule_override.get("ig_times") or os.getenv("SCHEDULE_IG_TIMES", "09:00,19:00"),
+        "yt_times": _schedule_override.get("yt_times") or os.getenv("SCHEDULE_YT_TIMES", "07:00,13:00,20:00"),
+        "ig_times": _schedule_override.get("ig_times") or os.getenv("SCHEDULE_IG_TIMES", "08:00,12:00,19:00"),
         "timezone": _schedule_override.get("timezone") or os.getenv("SCHEDULE_TIMEZONE", "Asia/Kolkata"),
         "jobs":     jobs,
     }
