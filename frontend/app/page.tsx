@@ -6,7 +6,6 @@ import { useAuth } from "@/lib/AuthContext";
 import JobForm from "@/components/JobForm";
 import SchedulePanel from "@/components/SchedulePanel";
 import AnalyticsPanel from "@/components/AnalyticsPanel";
-import AnalyticsPanel from "@/components/AnalyticsPanel";
 import LiveFeed from "@/components/LiveFeed";
 
 export default function Home() {
