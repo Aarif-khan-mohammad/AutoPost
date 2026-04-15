@@ -3,7 +3,7 @@ services:
     name: autopost-backend
     runtime: python
     rootDir: backend
-    buildCommand: apt-get install -y nodejs tor netcat-openbsd && pip install -r requirements.txt
+    buildCommand: apt-get install -y nodejs tor netcat-openbsd && pip install -r requirements.txt && python -c "import imageio_ffmpeg, shutil, os; shutil.copy(imageio_ffmpeg.get_ffmpeg_exe(), '/usr/local/bin/ffmpeg')"
     startCommand: bash start.sh
     envVars:
       - key: GEMINI_API_KEY
