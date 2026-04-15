@@ -170,10 +170,10 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
 # ── 2. Download full video ────────────────────────────────────────────────────
 
 _DOWNLOAD_ATTEMPTS = [
-    ("android_vr", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/18/best"),
-    ("android",    "18/best"),
-    ("mweb",       "bestvideo[height<=720]+bestaudio/best[height<=720]/18/best"),
-    ("web",        "18/best"),
+    ("android_vr", "18/best[height<=720]"),
+    ("android",    "18/best[height<=720]"),
+    ("mweb",       "18/best[height<=720]"),
+    ("web",        "18/best[height<=720]"),
 ]
 
 
@@ -192,6 +192,8 @@ def download_video(video_url: str, job_id: str) -> str:
             log.info("[slicer] Using Tor proxy on port 9050")
         except Exception as tor_err:
             log.warning(f"[slicer] Tor not available: {tor_err}")
+    if proxy:
+        log.info(f"[slicer] Proxy set: {proxy[:40]}")
     token = _get_oauth_token()
     if os.path.exists(out):
         os.remove(out)
