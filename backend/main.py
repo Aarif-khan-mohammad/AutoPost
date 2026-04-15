@@ -122,12 +122,25 @@ async def scheduled_post(
     ig_token: str | None = None,
     ig_uid:   str | None = None,
 ):
-    channel = channel_override.strip() or (_schedule_override.get("channel") or os.getenv("SCHEDULE_CHANNEL_URL", "")).strip()
-    if not channel:
+    import random
+    # Support multiple channels — pick randomly for variety
+    channels_env = os.getenv("SCHEDULE_CHANNEL_URLS", "")
+    if channels_env:
+        channels = [c.strip() for c in channels_env.split(",") if c.strip()]
+    else:
+        single = (_schedule_override.get("channel") or os.getenv("SCHEDULE_CHANNEL_URL", "")).strip()
+        channels = [single] if single else []
+
+    if channel_override.strip():
+        channels = [channel_override.strip()]
+
+    if not channels:
         log.warning("[scheduler] Fired but no channel configured — skipping")
         return
+
+    channel = random.choice(channels)
     job_id = str(uuid.uuid4())
-    log.info(f"[scheduler] ⏰ Auto-post triggered platform={platform} channel={channel}")
+    log.info(f"[scheduler] ⏰ Auto-post triggered platform={platform} channel={channel} (picked from {len(channels)} channels)")
     await create_job(job_id, channel)
     req = ProcessRequest(
         channel_url=channel,

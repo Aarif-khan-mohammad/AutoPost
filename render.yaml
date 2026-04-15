@@ -20,6 +20,8 @@ services:
         sync: false
       - key: SCHEDULE_CHANNEL_URL
         sync: false
+      - key: SCHEDULE_CHANNEL_URLS
+        value: "https://www.youtube.com/@MrBeast,https://www.youtube.com/@IShowSpeed"
       - key: SCHEDULE_TIMES
         value: "07:00,12:00,18:00"
       - key: SCHEDULE_TIMEZONE
