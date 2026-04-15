@@ -3,7 +3,7 @@ services:
     name: autopost-backend
     runtime: python
     rootDir: backend
-    buildCommand: apt-get install -y nodejs tor && pip install -r requirements.txt
+    buildCommand: apt-get install -y nodejs tor netcat-openbsd && pip install -r requirements.txt
     startCommand: bash start.sh
     envVars:
       - key: GEMINI_API_KEY

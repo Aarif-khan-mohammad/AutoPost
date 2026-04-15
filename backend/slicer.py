@@ -180,15 +180,18 @@ _DOWNLOAD_ATTEMPTS = [
 def download_video(video_url: str, job_id: str) -> str:
     out   = os.path.join(DOWNLOADS_DIR, f"{job_id}_source.mp4")
     proxy = os.getenv("YTDLP_PROXY", "").strip() or None
-    # Fall back to Tor if no proxy configured (Tor runs on port 9050 on Render)
+    # Use Tor if no proxy configured and Tor is running
     if not proxy:
         import socket
         try:
-            socket.create_connection(("127.0.0.1", 9050), timeout=2).close()
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(2)
+            s.connect(("127.0.0.1", 9050))
+            s.close()
             proxy = "socks5://127.0.0.1:9050"
-            log.info("[slicer] Using Tor proxy")
-        except Exception:
-            pass
+            log.info("[slicer] Using Tor proxy on port 9050")
+        except Exception as tor_err:
+            log.warning(f"[slicer] Tor not available: {tor_err}")
     token = _get_oauth_token()
     if os.path.exists(out):
         os.remove(out)
