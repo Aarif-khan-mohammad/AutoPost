@@ -178,9 +178,10 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
 # ── 2. Download full video ────────────────────────────────────────────────────
 
 _DOWNLOAD_ATTEMPTS = [
-    ("tv_embedded", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"),
-    ("web",         "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"),
-    ("mweb",        "best[height<=720]/best"),
+    ("android_vr", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"),
+    ("android",    "bestvideo[height<=720]+bestaudio/best[height<=720]/best"),
+    ("web",        "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"),
+    ("mweb",       "best[height<=720]/best"),
 ]
 
 
@@ -190,8 +191,7 @@ def download_video(video_url: str, job_id: str) -> str:
     if os.path.exists(out):
         os.remove(out)
 
-    # Use OAuth token for auth — more stable than cookies
-    token = _get_oauth_token()
+    cookies_file = _get_cookies_file()
 
     base = {
         "outtmpl":             out,
@@ -203,18 +203,13 @@ def download_video(video_url: str, job_id: str) -> str:
         "http_headers":        _YT_HEADERS,
         "ffmpeg_location":     os.path.dirname(FFMPEG),
     }
-    if token:
-        base["http_headers"] = {**_YT_HEADERS, "Authorization": f"Bearer {token}"}
-        log.info("[slicer] Using OAuth token for authentication")
-    else:
-        # Fall back to cookies only if no OAuth token
-        cookies_file = _get_cookies_file()
-        if cookies_file:
-            base["cookiefile"] = cookies_file
-            log.info("[slicer] Using cookies file for authentication")
     if proxy:
         base["proxy"] = proxy
         log.info(f"[slicer] Using proxy: {proxy[:40]}...")
+
+    # android_vr and android don't support cookies — use without
+    # web and mweb support cookies — pass them
+    COOKIE_CLIENTS = {"web", "mweb"}
 
     for client, fmt in _DOWNLOAD_ATTEMPTS:
         try:
@@ -224,6 +219,9 @@ def download_video(video_url: str, job_id: str) -> str:
                 "format": fmt,
                 "extractor_args": {"youtube": {"player_client": [client]}},
             }
+            if cookies_file and client in COOKIE_CLIENTS:
+                opts["cookiefile"] = cookies_file
+                log.info(f"[slicer] Using cookies for {client}")
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([video_url])
             if os.path.exists(out) and os.path.getsize(out) > 10_000:
