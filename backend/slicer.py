@@ -216,6 +216,10 @@ def download_video(video_url: str, job_id: str) -> str:
         "http_headers":        _YT_HEADERS,
         "ffmpeg_location":     os.path.dirname(FFMPEG),
     }
+    cookies_file = _get_cookies_file()
+    if cookies_file:
+        base["cookiefile"] = cookies_file
+        log.info("[slicer] Using cookies file for authentication")
     if proxy:
         base["proxy"] = proxy
         log.info(f"[slicer] Using proxy: {proxy[:40]}...")
