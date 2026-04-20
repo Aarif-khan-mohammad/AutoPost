@@ -178,10 +178,10 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
 # ── 2. Download full video ────────────────────────────────────────────────────
 
 _DOWNLOAD_ATTEMPTS = [
-    ("android_vr", "18/best[height<=720]"),
-    ("android",    "18/best[height<=720]"),
-    ("mweb",       "18/best[height<=720]"),
-    ("web",        "18/best[height<=720]"),
+    ("android_vr", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"),
+    ("android",    "bestvideo[height<=720]+bestaudio/best[height<=720]/best"),
+    ("mweb",       "best[height<=720]/best"),
+    ("web",        "best"),
 ]
 
 
