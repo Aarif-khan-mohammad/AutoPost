@@ -185,13 +185,33 @@ _DOWNLOAD_ATTEMPTS = [
 ]
 
 
+def _get_oauth_token_file() -> str | None:
+    """Write OAuth token to a temp file for yt-dlp-youtube-oauth2 plugin."""
+    refresh_token = os.getenv("YOUTUBE_REFRESH_TOKEN", "").strip()
+    client_id     = os.getenv("YOUTUBE_CLIENT_ID", "").strip()
+    client_secret = os.getenv("YOUTUBE_CLIENT_SECRET", "").strip()
+    if not all([refresh_token, client_id, client_secret]):
+        return None
+    import json
+    token_data = {
+        "token_type":    "Bearer",
+        "refresh_token": refresh_token,
+        "client_id":     client_id,
+        "client_secret": client_secret,
+    }
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json", mode="w")
+    json.dump(token_data, tmp)
+    tmp.close()
+    return tmp.name
+
+
 def download_video(video_url: str, job_id: str) -> str:
     out   = os.path.join(DOWNLOADS_DIR, f"{job_id}_source.mp4")
     proxy = os.getenv("YTDLP_PROXY", "").strip() or None
     if os.path.exists(out):
         os.remove(out)
 
-    cookies_file = _get_cookies_file()
+    token_file = _get_oauth_token_file()
 
     base = {
         "outtmpl":             out,
@@ -203,13 +223,14 @@ def download_video(video_url: str, job_id: str) -> str:
         "http_headers":        _YT_HEADERS,
         "ffmpeg_location":     os.path.dirname(FFMPEG),
     }
+    if token_file:
+        base["username"] = "oauth2"
+        base["password"] = ""
+        base["extractor_args"] = {"youtube": {"oauth2_token_file": [token_file]}}
+        log.info("[slicer] Using OAuth2 plugin for authentication")
     if proxy:
         base["proxy"] = proxy
         log.info(f"[slicer] Using proxy: {proxy[:40]}...")
-
-    # android_vr and android don't support cookies — use without
-    # web and mweb support cookies — pass them
-    COOKIE_CLIENTS = {"web", "mweb"}
 
     for client, fmt in _DOWNLOAD_ATTEMPTS:
         try:
@@ -217,11 +238,14 @@ def download_video(video_url: str, job_id: str) -> str:
             opts = {
                 **base,
                 "format": fmt,
-                "extractor_args": {"youtube": {"player_client": [client]}},
+                "extractor_args": {
+                    **base.get("extractor_args", {}),
+                    "youtube": {
+                        **base.get("extractor_args", {}).get("youtube", {}),
+                        "player_client": [client],
+                    },
+                },
             }
-            if cookies_file and client in COOKIE_CLIENTS:
-                opts["cookiefile"] = cookies_file
-                log.info(f"[slicer] Using cookies for {client}")
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([video_url])
             if os.path.exists(out) and os.path.getsize(out) > 10_000:
