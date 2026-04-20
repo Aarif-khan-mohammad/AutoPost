@@ -220,6 +220,8 @@ def download_video(video_url: str, job_id: str) -> str:
         os.remove(out)
 
     cookies_file = _get_cookies_file()
+    # Try access token first (fastest), fall back to cookies
+    access_token = os.getenv("YOUTUBE_ACCESS_TOKEN", "").strip()
 
     base = {
         "outtmpl":             out,
@@ -231,7 +233,10 @@ def download_video(video_url: str, job_id: str) -> str:
         "http_headers":        _YT_HEADERS,
         "ffmpeg_location":     os.path.dirname(FFMPEG),
     }
-    if cookies_file:
+    if access_token:
+        base["http_headers"] = {**_YT_HEADERS, "Authorization": f"Bearer {access_token}"}
+        log.info("[slicer] Using access token for authentication")
+    elif cookies_file:
         base["cookiefile"] = cookies_file
         log.info("[slicer] Using cookies file")
     if proxy:
