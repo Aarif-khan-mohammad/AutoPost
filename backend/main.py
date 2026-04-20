@@ -75,8 +75,10 @@ def _setup_scheduler(override: dict = None):
     tz_name = cfg.get("timezone") or os.getenv("SCHEDULE_TIMEZONE", "Asia/Kolkata")
     channel = (cfg.get("channel") or os.getenv("SCHEDULE_CHANNEL_URL", "")).strip()
 
-    yt_times = (cfg.get("yt_times") or os.getenv("SCHEDULE_YT_TIMES", "07:00,13:00,20:00")).split(",")
-    ig_times = (cfg.get("ig_times") or os.getenv("SCHEDULE_IG_TIMES", "08:00,12:00,19:00")).split(",")
+    # Default: 3 posts/day at US peak hours (IST) — morning commute, lunch, evening
+    # 07:00 IST = 9:30 PM EST prev day (night owls), 17:30 IST = 7 AM EST, 22:30 IST = 12 PM EST
+    yt_times = (cfg.get("yt_times") or os.getenv("SCHEDULE_YT_TIMES", "07:00,17:30,22:30")).split(",")
+    ig_times = (cfg.get("ig_times") or os.getenv("SCHEDULE_IG_TIMES", "07:00,17:30,22:30")).split(",")
 
     if not channel:
         log.warning("[scheduler] SCHEDULE_CHANNEL_URL not set — auto-posting disabled.")
@@ -158,7 +160,22 @@ async def scheduled_post(
 async def lifespan(app: FastAPI):
     await init_db()
     try:
-        _setup_scheduler()
+        # Auto-get Gemini recommended times on startup if not manually overridden
+        tz = os.getenv("SCHEDULE_TIMEZONE", "Asia/Kolkata")
+        if not os.getenv("SCHEDULE_YT_TIMES") and not os.getenv("SCHEDULE_IG_TIMES"):
+            log.info("[scheduler] Asking Gemini for best posting times...")
+            yt, ig = await asyncio.to_thread(_gemini_best_times, tz)
+            # Ensure 3 slots — Gemini gives 2, add a morning slot
+            yt_slots = yt.split(",")
+            ig_slots = ig.split(",")
+            if len(yt_slots) < 3:
+                yt_slots = ["07:00"] + yt_slots
+            if len(ig_slots) < 3:
+                ig_slots = ["07:00"] + ig_slots
+            _schedule_override["yt_times"] = ",".join(yt_slots)
+            _schedule_override["ig_times"] = ",".join(ig_slots)
+            log.info(f"[scheduler] Gemini times set — YT: {_schedule_override['yt_times']} | IG: {_schedule_override['ig_times']}")
+        _setup_scheduler(_schedule_override if _schedule_override else None)
     except Exception as e:
         log.error(f"[scheduler] Startup error: {e}")
     yield
