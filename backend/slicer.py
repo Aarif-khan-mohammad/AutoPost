@@ -104,7 +104,7 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
                 [
                     _sys.executable, "-m", "yt_dlp",
                     "--flat-playlist",
-                    "--print", "%(id)s|%(duration)s|%(title)s",
+                    "--print", "%(id)s|%(duration)s|%(title)s|%(view_count)s|%(upload_date)s",
                     "--playlist-end", "30",
                     "--quiet",
                     base_url + tab,
@@ -121,7 +121,7 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
 
             seen = {c["video_id"] for c in candidates}
             for line in lines:
-                parts = line.split("|", 2)
+                parts = line.split("|", 4)
                 if len(parts) < 2:
                     continue
                 vid_id = parts[0].strip()
@@ -129,17 +129,28 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
                     duration = float(parts[1].strip() or 0)
                 except ValueError:
                     duration = 0
-                title = parts[2].strip() if len(parts) > 2 else ""
-                # /shorts tab: duration is NA — anything there is a Short by definition
-                # /videos tab: only include if duration <= 60
+                title      = parts[2].strip() if len(parts) > 2 else ""
+                try:
+                    view_count = int(parts[3].strip() or 0)
+                except (ValueError, IndexError):
+                    view_count = 0
+                try:
+                    upload_date = parts[4].strip() if len(parts) > 4 else "0"
+                    # yt-dlp returns YYYYMMDD
+                    from datetime import datetime as _dt
+                    timestamp = int(_dt.strptime(upload_date, "%Y%m%d").timestamp()) if upload_date and upload_date != "NA" else 0
+                except Exception:
+                    timestamp = 0
+
                 if vid_id and vid_id not in already_used and vid_id not in seen:
                     if tab == "/shorts" or (0 < duration <= 60):
                         candidates.append({
-                            "video_id": vid_id,
-                            "url":      f"https://www.youtube.com/watch?v={vid_id}",
-                            "title":    title,
-                            "duration": int(duration) if duration > 0 else 60,
-                            "timestamp": 0,
+                            "video_id":   vid_id,
+                            "url":        f"https://www.youtube.com/watch?v={vid_id}",
+                            "title":      title,
+                            "duration":   int(duration) if duration > 0 else 60,
+                            "timestamp":  timestamp,
+                            "view_count": view_count,
                         })
 
         log.info(f"[slicer] Found {len(candidates)} unprocessed short(s) (<= 60s)")
@@ -150,20 +161,17 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
     if not candidates:
         raise RuntimeError("No new shorts found — all recent uploads already processed.")
 
-    # Sort newest first, pick today's if available else most recent
-    from datetime import datetime, timezone
-    candidates.sort(key=lambda v: v["timestamp"], reverse=True)
-    today = datetime.now(timezone.utc).date()
-    todays = [
-        v for v in candidates
-        if v["timestamp"] and datetime.fromtimestamp(v["timestamp"], tz=timezone.utc).date() == today
-    ]
-    chosen = todays[0] if todays else candidates[0]
-    upload_date = (
-        datetime.fromtimestamp(chosen["timestamp"], tz=timezone.utc).date()
-        if chosen["timestamp"] else "unknown"
-    )
-    log.info(f"[slicer] Selected: '{chosen['title']}' ({chosen['duration']}s) uploaded={upload_date} — {chosen['url']}")
+    from datetime import datetime, timezone, timedelta
+    now   = datetime.now(timezone.utc)
+    week_ago = (now - timedelta(days=7)).timestamp()
+
+    # Prefer videos from last 7 days sorted by view count (most viral recent)
+    recent = [v for v in candidates if v["timestamp"] and v["timestamp"] >= week_ago]
+    pool   = recent if recent else candidates
+    pool.sort(key=lambda v: v["view_count"], reverse=True)
+    chosen = pool[0]
+
+    log.info(f"[slicer] Selected: '{chosen['title']}' views={chosen['view_count']} — {chosen['url']}")
     return chosen
 
 
@@ -236,11 +244,11 @@ def download_video(video_url: str, job_id: str) -> str:
 
 # ── 3. Gemini — find best 60s in the full video ───────────────────────────────
 
-def analyze_with_gemini(video_path: str, duration: int, platform: str = "youtube") -> tuple[float, str, list[str]]:
+def analyze_with_gemini(video_path: str, duration: int, platform: str = "youtube", source_title: str = "") -> tuple[float, str, list[str]]:
     models_to_try = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-lite", "gemini-2.0-flash"]
     for model_name in models_to_try:
         try:
-            return _call_gemini(model_name, video_path, duration, platform)
+            return _call_gemini(model_name, video_path, duration, platform, source_title)
         except Exception as e:
             msg = str(e)
             if "429" in msg or "quota" in msg.lower():
@@ -250,7 +258,7 @@ def analyze_with_gemini(video_path: str, duration: int, platform: str = "youtube
     raise RuntimeError("All Gemini models quota exceeded. Wait a minute and retry.")
 
 
-def _call_gemini(model_name: str, video_path: str, duration: int, platform: str = "youtube") -> tuple[float, str, list[str]]:
+def _call_gemini(model_name: str, video_path: str, duration: int, platform: str = "youtube", source_title: str = "") -> tuple[float, str, list[str]]:
     model = genai.GenerativeModel(model_name)
     log.info(f"[slicer] Uploading to Gemini ({model_name}), duration={duration}s platform={platform}")
 
@@ -296,6 +304,7 @@ def _call_gemini(model_name: str, video_path: str, duration: int, platform: str 
 
     # Extract creator/channel name from video path for context
     channel_hint = os.path.basename(video_path).split("_")[0]
+    title_context = f"\n\nSource video title: \"{source_title}\"" if source_title else ""
 
     # Load optimization hints from last analytics run
     try:
@@ -305,23 +314,23 @@ def _call_gemini(model_name: str, video_path: str, duration: int, platform: str 
         hints_text = ""
 
     if is_short:
-        prompt = f"""You are a viral YouTube Shorts growth expert. Analyze this short-form video carefully.
+        prompt = f"""You are a viral YouTube Shorts growth expert. Analyze this short-form video carefully.{title_context}
 {platform_context}
 
 Your job: write a title + caption that makes people STOP scrolling and click.
 Rules:
-- Mention the creator's name or recognizable people visible in the video
+- Extract and mention the EXACT creator names / famous people visible or mentioned in the video
 - Use a curiosity gap or cliffhanger (e.g. "...and then this happened", "nobody expected this")
 - Include an emotion word (shocked, insane, crazy, hilarious, unbelievable)
 - Keep caption under 120 chars, no hashtags in caption
-- Hashtags: 3 niche creator/topic tags + 2 broad tags (e.g. #MrBeast #IShowSpeed not #viral #trending)
+- Hashtags: use the ACTUAL creator names as tags + 2 topic tags (e.g. #MrBeast #IShowSpeed #Shorts — NOT #viral #trending)
 
 Reply EXACTLY in this format (no extra text):
 START_TIME: 0
-CAPTION: <title with creator name + curiosity gap + emotion>
+CAPTION: <title with real creator names + curiosity gap + emotion>
 HASHTAGS: <tag1>, <tag2>, <tag3>, <tag4>, <tag5>"""
     else:
-        prompt = f"""You are a viral YouTube Shorts growth expert. Analyze this video carefully.
+        prompt = f"""You are a viral YouTube Shorts growth expert. Analyze this video carefully.{title_context}
 {platform_context}
 This video is {duration} seconds long. Find the single BEST {CLIP_DURATION}-second segment.{hints_text}
 
@@ -329,15 +338,15 @@ Prioritize segments with: peak emotional reaction, surprising moment, creator do
 Avoid: intros, outros, sponsor segments, slow talking parts.
 
 For the caption:
-- Mention the creator's name or recognizable people in that segment
+- Extract and mention the EXACT creator names / famous people in that segment
 - Use a curiosity gap or cliffhanger
 - Include an emotion word (shocked, insane, crazy, hilarious, unbelievable)
 - Keep under 120 chars, no hashtags
-- Hashtags: 3 niche creator/topic tags + 2 broad tags (NOT #viral #trending #fyp — those are dead)
+- Hashtags: use ACTUAL creator names as tags + 2 topic tags (NOT #viral #trending #fyp — those are dead)
 
 Reply EXACTLY in this format (no extra text):
 START_TIME: <integer seconds, 0-{max_start}>
-CAPTION: <title with creator name + curiosity gap + emotion>
+CAPTION: <title with real creator names + curiosity gap + emotion>
 HASHTAGS: <tag1>, <tag2>, <tag3>, <tag4>, <tag5>"""
 
     response = model.generate_content([video_file, prompt])
@@ -410,9 +419,9 @@ def process_channel(
 
     step("analyzing")
     if is_short:
-        start, caption, hashtags = 0.0, *analyze_with_gemini(source, video_info["duration"], platform)[1:]
+        start, caption, hashtags = 0.0, *analyze_with_gemini(source, video_info["duration"], platform, video_info["title"])[1:]
     else:
-        start, caption, hashtags = analyze_with_gemini(source, video_info["duration"], platform)
+        start, caption, hashtags = analyze_with_gemini(source, video_info["duration"], platform, video_info["title"])
 
     step("slicing")
     output = export_vertical(source, start, job_id)
