@@ -178,33 +178,20 @@ def get_next_video(channel_url: str, already_used: list[str]) -> dict:
 # ── 2. Download full video ────────────────────────────────────────────────────
 
 _DOWNLOAD_ATTEMPTS = [
-    ("android_vr", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"),
-    ("android",    "bestvideo[height<=720]+bestaudio/best[height<=720]/best"),
-    ("mweb",       "best[height<=720]/best"),
-    ("web",        "best"),
+    ("tv_embedded", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"),
+    ("web",         "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"),
+    ("mweb",        "best[height<=720]/best"),
 ]
 
 
 def download_video(video_url: str, job_id: str) -> str:
     out   = os.path.join(DOWNLOADS_DIR, f"{job_id}_source.mp4")
     proxy = os.getenv("YTDLP_PROXY", "").strip() or None
-    # Use Tor if no proxy configured and Tor is running
-    if not proxy:
-        import socket
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(2)
-            s.connect(("127.0.0.1", 9050))
-            s.close()
-            proxy = "socks5://127.0.0.1:9050"
-            log.info("[slicer] Using Tor proxy on port 9050")
-        except Exception as tor_err:
-            log.warning(f"[slicer] Tor not available: {tor_err}")
-    if proxy:
-        log.info(f"[slicer] Proxy set: {proxy[:40]}")
-    token = _get_oauth_token()
     if os.path.exists(out):
         os.remove(out)
+
+    # Use OAuth token for auth — more stable than cookies
+    token = _get_oauth_token()
 
     base = {
         "outtmpl":             out,
@@ -216,10 +203,15 @@ def download_video(video_url: str, job_id: str) -> str:
         "http_headers":        _YT_HEADERS,
         "ffmpeg_location":     os.path.dirname(FFMPEG),
     }
-    cookies_file = _get_cookies_file()
-    if cookies_file:
-        base["cookiefile"] = cookies_file
-        log.info("[slicer] Using cookies file for authentication")
+    if token:
+        base["http_headers"] = {**_YT_HEADERS, "Authorization": f"Bearer {token}"}
+        log.info("[slicer] Using OAuth token for authentication")
+    else:
+        # Fall back to cookies only if no OAuth token
+        cookies_file = _get_cookies_file()
+        if cookies_file:
+            base["cookiefile"] = cookies_file
+            log.info("[slicer] Using cookies file for authentication")
     if proxy:
         base["proxy"] = proxy
         log.info(f"[slicer] Using proxy: {proxy[:40]}...")
