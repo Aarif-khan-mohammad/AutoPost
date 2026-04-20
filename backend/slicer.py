@@ -211,7 +211,11 @@ def download_video(video_url: str, job_id: str) -> str:
     if os.path.exists(out):
         os.remove(out)
 
-    token_file = _get_oauth_token_file()
+    # OAuth2 token file saved by: yt-dlp --username oauth2 --password "" <url>
+    oauth_token_file = os.path.join(
+        os.getenv("APPDATA", os.path.expanduser("~")),
+        "yt-dlp", "oauth2.token"
+    )
 
     base = {
         "outtmpl":             out,
@@ -223,11 +227,15 @@ def download_video(video_url: str, job_id: str) -> str:
         "http_headers":        _YT_HEADERS,
         "ffmpeg_location":     os.path.dirname(FFMPEG),
     }
-    if token_file:
+    if os.path.exists(oauth_token_file):
         base["username"] = "oauth2"
         base["password"] = ""
-        base["extractor_args"] = {"youtube": {"oauth2_token_file": [token_file]}}
-        log.info("[slicer] Using OAuth2 plugin for authentication")
+        log.info(f"[slicer] Using OAuth2 token file: {oauth_token_file}")
+    else:
+        cookies_file = _get_cookies_file()
+        if cookies_file:
+            base["cookiefile"] = cookies_file
+            log.info("[slicer] Using cookies file for authentication")
     if proxy:
         base["proxy"] = proxy
         log.info(f"[slicer] Using proxy: {proxy[:40]}...")
@@ -238,13 +246,7 @@ def download_video(video_url: str, job_id: str) -> str:
             opts = {
                 **base,
                 "format": fmt,
-                "extractor_args": {
-                    **base.get("extractor_args", {}),
-                    "youtube": {
-                        **base.get("extractor_args", {}).get("youtube", {}),
-                        "player_client": [client],
-                    },
-                },
+                "extractor_args": {"youtube": {"player_client": [client]}},
             }
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([video_url])
