@@ -205,17 +205,21 @@ def _get_oauth_token_file() -> str | None:
     return tmp.name
 
 
+_DOWNLOAD_ATTEMPTS = [
+    ("android_vr", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"),
+    ("android",    "bestvideo[height<=720]+bestaudio/best[height<=720]/best"),
+    ("web",        "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"),
+    ("mweb",       "best[height<=720]/best"),
+]
+
+
 def download_video(video_url: str, job_id: str) -> str:
     out   = os.path.join(DOWNLOADS_DIR, f"{job_id}_source.mp4")
     proxy = os.getenv("YTDLP_PROXY", "").strip() or None
     if os.path.exists(out):
         os.remove(out)
 
-    # OAuth2 token file saved by: yt-dlp --username oauth2 --password "" <url>
-    oauth_token_file = os.path.join(
-        os.getenv("APPDATA", os.path.expanduser("~")),
-        "yt-dlp", "oauth2.token"
-    )
+    cookies_file = _get_cookies_file()
 
     base = {
         "outtmpl":             out,
@@ -227,15 +231,9 @@ def download_video(video_url: str, job_id: str) -> str:
         "http_headers":        _YT_HEADERS,
         "ffmpeg_location":     os.path.dirname(FFMPEG),
     }
-    if os.path.exists(oauth_token_file):
-        base["username"] = "oauth2"
-        base["password"] = ""
-        log.info(f"[slicer] Using OAuth2 token file: {oauth_token_file}")
-    else:
-        cookies_file = _get_cookies_file()
-        if cookies_file:
-            base["cookiefile"] = cookies_file
-            log.info("[slicer] Using cookies file for authentication")
+    if cookies_file:
+        base["cookiefile"] = cookies_file
+        log.info("[slicer] Using cookies file")
     if proxy:
         base["proxy"] = proxy
         log.info(f"[slicer] Using proxy: {proxy[:40]}...")
