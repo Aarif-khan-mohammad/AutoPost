@@ -77,8 +77,8 @@ def _setup_scheduler(override: dict = None):
 
     # Default: 3 posts/day at US peak hours (IST) — morning commute, lunch, evening
     # 07:00 IST = 9:30 PM EST prev day (night owls), 17:30 IST = 7 AM EST, 22:30 IST = 12 PM EST
-    yt_times = (cfg.get("yt_times") or os.getenv("SCHEDULE_YT_TIMES", "07:00,17:30,22:30")).split(",")
-    ig_times = (cfg.get("ig_times") or os.getenv("SCHEDULE_IG_TIMES", "07:00,17:30,22:30")).split(",")
+    yt_times = (cfg.get("yt_times") or os.getenv("SCHEDULE_YT_TIMES", "06:00,17:00,21:30,01:30")).split(",")
+    ig_times = (cfg.get("ig_times") or os.getenv("SCHEDULE_IG_TIMES", "06:00,17:00,21:30,01:30")).split(",")
 
     if not channel:
         log.warning("[scheduler] SCHEDULE_CHANNEL_URL not set — auto-posting disabled.")
@@ -124,8 +124,7 @@ async def scheduled_post(
     ig_token: str | None = None,
     ig_uid:   str | None = None,
 ):
-    import random
-    # Support multiple channels — pick randomly for variety
+    # Rotate through all channels sequentially for even coverage
     channels_env = os.getenv("SCHEDULE_CHANNEL_URLS", "")
     if channels_env:
         channels = [c.strip() for c in channels_env.split(",") if c.strip()]
@@ -140,9 +139,12 @@ async def scheduled_post(
         log.warning("[scheduler] Fired but no channel configured — skipping")
         return
 
-    channel = random.choice(channels)
+    # Pick channel based on current hour to distribute evenly across the day
+    from datetime import datetime
+    hour_index = datetime.now().hour % len(channels)
+    channel = channels[hour_index]
     job_id = str(uuid.uuid4())
-    log.info(f"[scheduler] ⏰ Auto-post triggered platform={platform} channel={channel} (picked from {len(channels)} channels)")
+    log.info(f"[scheduler] ⏰ Auto-post triggered platform={platform} channel={channel} ({hour_index+1}/{len(channels)})")
     await create_job(job_id, channel)
     req = ProcessRequest(
         channel_url=channel,
@@ -493,8 +495,8 @@ async def get_schedule():
     ]
     return {
         "channel":  _schedule_override.get("channel")  or os.getenv("SCHEDULE_CHANNEL_URL", ""),
-        "yt_times": _schedule_override.get("yt_times") or os.getenv("SCHEDULE_YT_TIMES", "07:00,13:00,20:00"),
-        "ig_times": _schedule_override.get("ig_times") or os.getenv("SCHEDULE_IG_TIMES", "08:00,12:00,19:00"),
+        "yt_times": _schedule_override.get("yt_times") or os.getenv("SCHEDULE_YT_TIMES", "06:00,17:00,21:30,01:30"),
+        "ig_times": _schedule_override.get("ig_times") or os.getenv("SCHEDULE_IG_TIMES", "06:00,17:00,21:30,01:30"),
         "timezone": _schedule_override.get("timezone") or os.getenv("SCHEDULE_TIMEZONE", "Asia/Kolkata"),
         "jobs":     jobs,
     }
